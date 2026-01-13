@@ -1,0 +1,145 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+:root{
+  --gap: 12px;
+  --radius: 12px;
+  --panel-bg: #fff;
+  --panel-border: #e5e7eb;
+  --shadow: 0 1px 2px rgba(0,0,0,.06);
+  --filters-width: 320px;
+  --font: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+body{
+  margin: 0;
+  font-family: var(--font);
+  background: #f6f7f9;
+  color: #111;
+}
+
+.app{
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr var(--filters-width);
+  gap: var(--gap);
+  padding: var(--gap);
+}
+
+/* Left dashboard = 2x2 grid */
+.main{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--gap);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Panels */
+.panel{
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.panel__header{
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel__title{
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.panel__body{
+  padding: 10px 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Filters */
+.filters{
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.filters__header{
+  padding: 12px;
+  border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.filters__title{
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.filters__form{
+  padding: 12px;
+  overflow: auto;
+}
+
+.filter-block{ margin-bottom: 12px; }
+
+.filter-label{
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #374151;
+}
+
+.hint{
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* Make the SVG fill each panel */
+.vis-svg{
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #fafafa;
+}
+
+/* Map expand mode: map takes full main area, filters stay */
+.app.mode-map .main{
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+.app.mode-map .panel.sankey,
+.app.mode-map .panel.bar,
+.app.mode-map .panel.donut{
+  display: none;
+}
+.app.mode-map .panel.map{
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}

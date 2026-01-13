@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Naturvation Decision Tool</title>
+
+  <!-- Local Bootstrap (optional, but you already have it) -->
+  <link rel="stylesheet" href="css/bootstrap.min.css" />
+
+  <!-- Your CSS -->
+  <link rel="stylesheet" href="css/style.css" />
+
+  <!-- D3 (online for now; simplest) -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+
+<body>
+  <div id="app" class="app mode-dashboard">
+
+    <!-- LEFT: main dashboard -->
+    <main class="main">
+
+      <!-- Top-left: Map (aggregated world) -->
+      <section class="panel map" aria-label="Map panel">
+        <header class="panel__header">
+          <h2 class="panel__title">Projects by Continent</h2>
+          <button id="btnMapExpand" class="btn btn-sm btn-outline-secondary" type="button">
+            Expand map
+          </button>
+        </header>
+        <div id="vis-map" class="panel__body">
+          <svg id="svg-map" class="vis-svg" aria-label="Map"></svg>
+        </div>
+      </section>
+
+      <!-- Top-middle: Sankey -->
+      <section class="panel sankey" aria-label="Sankey panel">
+        <header class="panel__header">
+          <h2 class="panel__title">Challenge → Type</h2>
+        </header>
+        <div id="vis-sankey" class="panel__body">
+          <svg id="svg-sankey" class="vis-svg" aria-label="Sankey"></svg>
+        </div>
+      </section>
+
+      <!-- Bottom-left: Bar -->
+      <section class="panel bar" aria-label="Bar chart panel">
+        <header class="panel__header">
+          <h2 class="panel__title">Projects by Type</h2>
+        </header>
+        <div id="vis-bar" class="panel__body">
+          <svg id="svg-bar" class="vis-svg" aria-label="Bar chart"></svg>
+        </div>
+      </section>
+
+      <!-- Bottom-middle: Donut -->
+      <section class="panel donut" aria-label="Donut chart panel">
+        <header class="panel__header">
+          <h2 class="panel__title">Project Status</h2>
+        </header>
+        <div id="vis-donut" class="panel__body">
+          <svg id="svg-donut" class="vis-svg" aria-label="Donut chart"></svg>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- RIGHT: filters (persistent) -->
+    <aside class="filters" aria-label="Filters">
+      <header class="filters__header">
+        <h2 class="filters__title">Filters</h2>
+        <button id="btnClearFilters" class="btn btn-sm btn-outline-secondary" type="button">
+          Clear
+        </button>
+      </header>
+
+      <form id="filterForm" class="filters__form">
+
+        <div class="filter-block">
+          <label class="filter-label" for="f-country">Country</label>
+          <select id="f-country" name="country" class="form-select">
+            <option value="">All</option>
+            <!-- Populate later from data -->
+            <option value="NL">Netherlands</option>
+            <option value="DE">Germany</option>
+            <option value="FR">France</option>
+          </select>
+        </div>
+
+        <div class="filter-block">
+          <label class="filter-label" for="f-type">Type</label>
+          <select id="f-type" name="type" class="form-select">
+            <option value="">All</option>
+            <!-- Populate later from data -->
+            <option value="Type1">Type 1</option>
+            <option value="Type2">Type 2</option>
+            <option value="Type3">Type 3</option>
+          </select>
+        </div>
+
+        <div class="filter-block">
+          <label class="filter-label" for="f-status">Status</label>
+          <select id="f-status" name="status" class="form-select">
+            <option value="">All</option>
+            <!-- Populate later from data -->
+            <option value="Completed">Completed</option>
+            <option value="In progress">In progress</option>
+            <option value="Planned">Planned</option>
+          </select>
+        </div>
+
+        <hr />
+
+        <p class="hint">
+          Tip: select a bar (type) to update all views.
+        </p>
+
+      </form>
+    </aside>
+
+  </div>
+
+  <!-- Your JS -->
+  <script src="js/app.js"></script>
+</body>
+</html>
