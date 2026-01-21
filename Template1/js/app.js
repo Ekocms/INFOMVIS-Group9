@@ -1,7 +1,11 @@
 // ========= Helpers =========
 function getBoxSize(el) {
   const r = el.getBoundingClientRect();
-  return { width: r.width, height: r.height };
+  // Guard against hidden/collapsed panels causing negative/zero sizes
+  return {
+    width: Math.max(1, r.width),
+    height: Math.max(1, r.height)
+  };
 }
 
 function setSvgToPanel(svgSelector, panelId) {
@@ -20,16 +24,72 @@ function norm(s) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ")
-    .replace(/[’']/g, "'"); // normalize apostrophes
+    .replace(/[’']/g, "'");
 }
 
 function isYes(v) {
-  return norm(v) === "yes" || norm(v) === "y" || norm(v) === "true" || norm(v) === "1";
+  const n = norm(v);
+  return n === "yes" || n === "y" || n === "true" || n === "1";
+}
+
+function isFiniteNumber(x) {
+  return Number.isFinite(x) && !Number.isNaN(x);
+}
+
+// Loose continent bounding boxes (lat/lon) to hide overseas territories.
+const CONTINENT_BBOX = new Map([
+  ["Europe",        { lonMin: -25, lonMax:  45, latMin:  34, latMax:  72 }],
+  ["North America", { lonMin: -170,lonMax: -50, latMin:   5, latMax:  83 }],
+  ["South America", { lonMin:  -95,lonMax: -30, latMin: -60, latMax:  15 }],
+  ["Africa",        { lonMin:  -25,lonMax:  60, latMin: -40, latMax:  38 }],
+  ["Asia",          { lonMin:   25,lonMax: 180, latMin:  -5, latMax:  82 }],
+  ["Oceania",       { lonMin:  110,lonMax: 180, latMin: -50, latMax:  10 }]
+]);
+
+function inBBox(lon, lat, bbox, pad = 0) {
+  if (!bbox) return true;
+  return (
+    lon >= (bbox.lonMin - pad) &&
+    lon <= (bbox.lonMax + pad) &&
+    lat >= (bbox.latMin - pad) &&
+    lat <= (bbox.latMax + pad)
+  );
+}
+
+
+// Split a label into 2 lines (best-effort) for axis tick labels
+function splitTwoLines(label) {
+  const s = String(label ?? "").trim();
+  if (!s) return ["", ""];
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length <= 2) return [s, ""];
+
+  const total = words.reduce((acc, w) => acc + w.length, 0);
+  const target = total / 2;
+
+  let bestIdx = 1;
+  let bestDiff = Infinity;
+  let leftLen = 0;
+  for (let i = 1; i < words.length; i++) {
+    leftLen += words[i - 1].length;
+    const rightLen = total - leftLen;
+    const diff = Math.abs(leftLen - target) + Math.abs(rightLen - target);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = i;
+    }
+  }
+
+  const line1 = words.slice(0, bestIdx).join(" ");
+  const line2 = words.slice(bestIdx).join(" ");
+  return [line1, line2];
 }
 
 // ========= Columns (from your CSV) =========
 const COL_COUNTRY = "Country";
 const COL_STATUS  = "Present stage of the intervention";
+const COL_LAT     = "lat";
+const COL_LON     = "lon";
 
 // Types
 const TYPE_COLUMNS = [
@@ -55,24 +115,20 @@ const CHALLENGE_COLUMNS = [
 
 // ========= App State =========
 const state = {
-  filters: {
-    country: "",
-    typeLabel: "",
-    status: ""
-  },
-  // coordinated selections (cross-view interactions)
-  selectedType: "",        // bar-click selection (type label)
-  selectedStatus: "",      // donut-click selection (status)
-  selectedChallenge: "",   // sankey-click selection (challenge label)
-  selectedContinent: ""    // map-click selection (continent)
+  filters: { country: "", typeLabel: "", status: "" },
+  selectedType: "",
+  selectedStatus: "",
+  selectedChallenge: "",
+  selectedContinent: "",
+  mapTransform: d3.zoomIdentity
 };
 
 // ========= Data =========
 let rawData = [];
-let worldGeo = null;
-
-// Built from worldGeo properties
-let countryToContinent = new Map(); // key: normalized country name => continent string
+let worldGeo = null;                 // GeoJSON FeatureCollection
+let countryToContinent = new Map();  // norm(country name) -> continent string
+let countryFeatureByName = new Map();// norm(country name) -> feature
+let mapZoom = null;
 
 // ========= DOM =========
 const appEl = document.getElementById("app");
@@ -86,25 +142,15 @@ const elStatus  = document.getElementById("f-status");
 
 // ========= Populate dropdowns from CSV =========
 function populateFiltersFromData() {
-  // Countries
-  const countries = Array.from(
-    new Set(rawData.map(d => (d[COL_COUNTRY] ?? "").trim()).filter(Boolean))
-  ).sort((a,b)=>a.localeCompare(b));
+  const countries = Array.from(new Set(rawData.map(d => (d[COL_COUNTRY] ?? "").trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b));
+  elCountry.innerHTML = `<option value="">All</option>` + countries.map(c => `<option value="${c}">${c}</option>`).join("");
 
-  elCountry.innerHTML = `<option value="">All</option>` +
-    countries.map(c => `<option value="${c}">${c}</option>`).join("");
+  elType.innerHTML = `<option value="">All</option>` + TYPE_COLUMNS.map(t => `<option value="${t.label}">${t.label}</option>`).join("");
 
-  // Types (labels)
-  elType.innerHTML = `<option value="">All</option>` +
-    TYPE_COLUMNS.map(t => `<option value="${t.label}">${t.label}</option>`).join("");
-
-  // Statuses
-  const statuses = Array.from(
-    new Set(rawData.map(d => (d[COL_STATUS] ?? "").trim()).filter(Boolean))
-  ).sort((a,b)=>a.localeCompare(b));
-
-  elStatus.innerHTML = `<option value="">All</option>` +
-    statuses.map(s => `<option value="${s}">${s}</option>`).join("");
+  const statuses = Array.from(new Set(rawData.map(d => (d[COL_STATUS] ?? "").trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b));
+  elStatus.innerHTML = `<option value="">All</option>` + statuses.map(s => `<option value="${s}">${s}</option>`).join("");
 }
 
 // ========= Central filtering (used by ALL views) =========
@@ -165,51 +211,177 @@ filterForm.addEventListener("change", () => {
   state.filters.typeLabel = filters.type ?? "";
   state.filters.status    = filters.status ?? "";
 
-  // if user uses dropdown "type", clear bar-click selection
+  // If user uses dropdown "type", clear bar-click selection
   if (state.filters.typeLabel) state.selectedType = "";
+
+  // Selecting a country should override continent drilldown
+  if (state.filters.country) state.selectedContinent = "";
 
   renderAll();
 });
 
 btnClearFilters.addEventListener("click", () => {
-  // reset form UI
   filterForm.reset();
 
-  // reset state
   state.filters = { country: "", typeLabel: "", status: "" };
   state.selectedType = "";
   state.selectedStatus = "";
   state.selectedChallenge = "";
   state.selectedContinent = "";
 
+  // Reset map zoom transform
+  state.mapTransform = d3.zoomIdentity;
+
   renderAll();
 });
 
-// ========= Render: Map (continent counts + click continent) =========
+// ========= Map utils =========
+function featureNameAndContinent(f) {
+  const p = f.properties || {};
+  const name = p.ADMIN || p.NAME || p.name || "";
+  const cont = p.CONTINENT || p.continent || "";
+  return { name, cont };
+}
+
+function pointInBounds(pt, bounds) {
+  if (!bounds) return true;
+  const [[x0, y0], [x1, y1]] = bounds;
+  const [x, y] = pt;
+  return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+}
+
+function continentProjectedBounds(path, continent) {
+  if (!worldGeo || !continent) return null;
+  const feats = worldGeo.features.filter(f => featureNameAndContinent(f).cont === continent);
+  if (!feats.length) return null;
+  const fc = { type: "FeatureCollection", features: feats };
+  return path.bounds(fc);
+}
+
+// Zoom helper that matches your projection fit area [[10,10],[width-10,height-40]]
+function zoomToBounds(capture, bounds, width, height, padding = 18, zoomFactor = 0.92) {
+  const [[x0, y0], [x1, y1]] = bounds;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+
+  const effectiveW = (width - 2 * padding);
+  const effectiveH = ((height - 40) - 2 * padding);
+
+  const scale = Math.max(
+    1,
+    Math.min(8, zoomFactor / Math.max(dx / effectiveW, dy / effectiveH))
+  );
+
+  const centerX = width / 2;
+  const centerY = (10 + (height - 40)) / 2;
+
+  const translate = [centerX - scale * cx, centerY - scale * cy];
+  const t = d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale);
+
+  state.mapTransform = t;
+
+  if (mapZoom && capture) {
+    capture.transition().duration(650).call(mapZoom.transform, t);
+  }
+}
+
+function zoomToFeature(capture, path, feature, width, height) {
+  zoomToBounds(capture, path.bounds(feature), width, height, 18, 0.92);
+}
+
+/**
+ * Zoom to POINT bounds of projects in the selected continent.
+ * Fixes Oceania centering and lets you control how zoomed-out it feels.
+ */
+function zoomToContinentPoints(capture, projection, width, height, continent, dataRows) {
+  const pts = dataRows
+    .filter(d => (countryToContinent.get(norm(d[COL_COUNTRY])) || "") === continent)
+    .map(d => {
+      const lat = +d[COL_LAT];
+      const lon = +d[COL_LON];
+      if (!isFiniteNumber(lat) || !isFiniteNumber(lon)) return null;
+      const p = projection([lon, lat]);
+      if (!p) return null;
+      return p;
+    })
+    .filter(Boolean);
+
+  if (!pts.length) return false;
+
+  const xs = pts.map(p => p[0]);
+  const ys = pts.map(p => p[1]);
+  const bounds = [[d3.min(xs), d3.min(ys)], [d3.max(xs), d3.max(ys)]];
+
+  // More "zoomed out" than before:
+  // - higher padding
+  // - slightly smaller zoomFactor (=> less zoom-in)
+  zoomToBounds(capture, bounds, width, height, 70, 0.80);
+  return true;
+}
+
+function zoomToContinent(capture, path, width, height, continent) {
+  const feats = worldGeo.features.filter(f => featureNameAndContinent(f).cont === continent);
+  if (!feats.length) return;
+  const fc = { type: "FeatureCollection", features: feats };
+  zoomToBounds(capture, path.bounds(fc), width, height, 18, 0.92);
+}
+
+function shouldShowBackButton() {
+  const t = state.mapTransform || d3.zoomIdentity;
+  const moved = Math.abs(t.x) > 0.5 || Math.abs(t.y) > 0.5;
+  const zoomed = (t.k || 1) > 1.01;
+  return !!state.selectedContinent || !!state.filters.country || moved || zoomed;
+}
+
+// ========= Render: Map =========
 function renderMap() {
   const { svg, width, height } = setSvgToPanel("#svg-map", "vis-map");
   svg.selectAll("*").remove();
 
   const filtered = applyAllFilters();
 
-  // fallback if topo/geo not loaded yet
   if (!worldGeo) {
     svg.append("text")
-      .attr("x", width/2).attr("y", height/2)
-      .attr("text-anchor","middle").attr("dominant-baseline","middle")
-      .attr("fill","#64748b").attr("font-size",14)
+      .attr("x", width / 2).attr("y", height / 2)
+      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("fill", "#64748b").attr("font-size", 14)
       .text("Map loading...");
     return;
   }
 
-  // projection
+  // Projection + path
   const projection = d3.geoMercator();
   const path = d3.geoPath(projection);
-
   projection.fitExtent([[10, 10], [width - 10, height - 40]], worldGeo);
 
-  // draw countries
-  svg.append("g")
+  // Zoom capture layer
+  const capture = svg.append("rect")
+    .attr("class", "zoom-capture")
+    .attr("x", 0).attr("y", 0)
+    .attr("width", width).attr("height", height)
+    .attr("fill", "transparent")
+    .style("pointer-events", "all");
+
+  // Base group (transformed)
+  const gBase = svg.append("g").attr("class", "map-base");
+  // UI overlay (not transformed)
+  const gUI = svg.append("g").attr("class", "map-ui");
+
+  // Zoom behavior
+  mapZoom = d3.zoom()
+    .scaleExtent([1, 8])
+    .on("zoom", (event) => {
+      state.mapTransform = event.transform;
+      gBase.attr("transform", state.mapTransform);
+    });
+
+  capture.call(mapZoom);
+  capture.call(mapZoom.transform, state.mapTransform || d3.zoomIdentity);
+
+  // Draw countries
+  gBase.append("g")
     .selectAll("path")
     .data(worldGeo.features)
     .join("path")
@@ -218,73 +390,199 @@ function renderMap() {
     .attr("stroke", "#cbd5e1")
     .attr("stroke-width", 0.6);
 
-  // count per continent from filtered rows
-  const contCounts = d3.rollups(
-    filtered,
-    v => v.length,
-    d => countryToContinent.get(norm(d[COL_COUNTRY])) || "Unknown"
-  ).map(([continent, value]) => ({ continent, value }))
-   .filter(d => d.continent !== "Unknown")
-   .sort((a,b)=>b.value-a.value);
+  // ---- Dots (continent hard-cut using bbox, no clipping) ----
+  const showDots =
+    !!state.filters.country ||
+    !!state.selectedContinent ||
+    appEl.classList.contains("mode-map");
 
-  // static label anchor points (lon/lat) – just for continent labels (NOT project lat/lon)
-  const anchors = new Map([
-    ["Africa", [20, 5]],
-    ["Europe", [15, 52]],
-    ["Asia", [95, 40]],
-    ["North America", [-100, 45]],
-    ["South America", [-60, -15]],
-    ["Oceania", [135, -25]]
-  ]);
+  let dots = [];
 
-  const gLabels = svg.append("g");
+  if (showDots) {
+    // Determine continent bbox (only when continent drilldown is active)
+    const bbox =
+      state.filters.country
+        ? null
+        : (state.selectedContinent ? CONTINENT_BBOX.get(state.selectedContinent) : null);
 
-  contCounts.forEach(d => {
-    const ll = anchors.get(d.continent);
-    if (!ll) return;
-    const [x, y] = projection(ll);
+    dots = filtered
+      .map(row => {
+        const lat = +row[COL_LAT];
+        const lon = +row[COL_LON];
+        if (!isFiniteNumber(lat) || !isFiniteNumber(lon)) return null;
 
-    const isSelected = state.selectedContinent === d.continent;
+        // Hide out-of-continent points (for continent drilldown only)
+        if (bbox && !inBBox(lon, lat, bbox, 0.5)) return null;
 
-    gLabels.append("rect")
-      .attr("x", x - 55)
-      .attr("y", y - 18)
-      .attr("rx", 6)
-      .attr("width", 110)
-      .attr("height", 28)
-      .attr("fill", isSelected ? "#e2e8f0" : "#ffffff")
-      .attr("stroke", isSelected ? "#64748b" : "#cbd5e1")
+        const p = projection([lon, lat]);
+        if (!p) return null;
+
+        return { x: p[0], y: p[1], row };
+      })
+      .filter(Boolean);
+
+    const gDots = gBase.append("g")
+      .attr("class", "map-dots");
+
+    gDots.selectAll("circle")
+      .data(dots)
+      .join("circle")
+      .attr("cx", d => d.x)
+      .attr("cy", d => d.y)
+      .attr("r", 3.4)
+      .attr("fill", "#ef4444")
+      .attr("opacity", 0.85)
+      .attr("stroke", "#ffffff")
+      .attr("stroke-width", 0.8)
       .style("cursor", "pointer")
-      .on("click", () => {
-        state.selectedContinent = (state.selectedContinent === d.continent) ? "" : d.continent;
+      .on("click", (_, d) => {
+        console.log("Clicked project row:", d.row);
+      });
+
+    // Optional debug (only when Europe is selected)
+    if (state.selectedContinent === "Europe") {
+      const bad = dots
+        .filter(d => {
+          const lon = +d.row[COL_LON];
+          const lat = +d.row[COL_LAT];
+          const inEuropeBox = (lon >= -25 && lon <= 45 && lat >= 34 && lat <= 72);
+          return !inEuropeBox;
+        })
+        .slice(0, 20)
+        .map(d => ({
+          Country: d.row[COL_COUNTRY],
+          lat: d.row[COL_LAT],
+          lon: d.row[COL_LON],
+          Status: d.row[COL_STATUS]
+        }));
+      console.log("Europe rows with out-of-Europe coords (sample 20):", bad);
+    }
+  }
+
+  // ---- Continent bubbles (ONLY when no drilldown) ----
+  const inDrilldown = !!state.selectedContinent || !!state.filters.country;
+  const showBubbles = !inDrilldown;
+
+  if (showBubbles) {
+    const contCounts = d3.rollups(
+      filtered,
+      v => v.length,
+      d => countryToContinent.get(norm(d[COL_COUNTRY])) || "Unknown"
+    )
+      .map(([continent, value]) => ({ continent, value }))
+      .filter(d => d.continent !== "Unknown")
+      .sort((a, b) => b.value - a.value);
+
+    const anchors = new Map([
+      ["Africa", [20, 5]],
+      ["Europe", [15, 52]],
+      ["Asia", [95, 40]],
+      ["North America", [-100, 45]],
+      ["South America", [-60, -15]],
+      ["Oceania", [135, -25]]
+    ]);
+
+    const gBubbles = gBase.append("g").attr("class", "continent-bubbles");
+
+    const bubble = gBubbles.selectAll("g.bubble")
+      .data(contCounts)
+      .join("g")
+      .attr("class", "bubble")
+      .style("cursor", "pointer")
+      .style("pointer-events", "all")
+      .each(function(d) {
+        const ll = anchors.get(d.continent);
+        if (!ll) return;
+        const [x, y] = projection(ll);
+        d.__x = x;
+        d.__y = y;
+      })
+      .attr("transform", d => `translate(${d.__x || 0},${d.__y || 0})`)
+      .on("click", (_, d) => {
+        state.selectedContinent = d.continent;
+        state.filters.country = "";
+        elCountry.value = "";
         renderAll();
       });
 
-    gLabels.append("text")
-      .attr("x", x)
-      .attr("y", y)
+    bubble.append("circle")
+      .attr("r", 16)
+      .attr("fill", "#ef4444")
+      .attr("opacity", 0.92);
+
+    bubble.append("text")
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr("fill", "#ffffff")
+      .attr("font-size", 11)
+      .attr("font-weight", 700)
+      .text(d => String(d.value));
+
+    gBubbles.raise();
+  }
+
+  // ---- Back button ----
+  if (shouldShowBackButton()) {
+    const backG = gUI.append("g")
+      .attr("class", "map-back")
+      .style("cursor", "pointer")
+      .on("click", () => {
+        state.selectedContinent = "";
+        state.filters.country = "";
+        elCountry.value = "";
+
+        state.mapTransform = d3.zoomIdentity;
+        renderAll();
+      });
+
+    backG.append("rect")
+      .attr("x", 12)
+      .attr("y", 12)
+      .attr("rx", 8)
+      .attr("width", 88)
+      .attr("height", 30)
+      .attr("fill", "#ffffff")
+      .attr("stroke", "#cbd5e1");
+
+    backG.append("text")
+      .attr("x", 56)
+      .attr("y", 27)
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "middle")
       .attr("fill", "#334155")
       .attr("font-size", 12)
-      .style("cursor", "pointer")
-      .text(`${d.continent} (${d.value})`)
-      .on("click", () => {
-        state.selectedContinent = (state.selectedContinent === d.continent) ? "" : d.continent;
-        renderAll();
-      });
-  });
+      .attr("font-weight", 600)
+      .text("Back");
+  }
 
-  svg.append("text")
-    .attr("x", width/2)
+  // Hint
+  gUI.append("text")
+    .attr("x", width / 2)
     .attr("y", height - 12)
     .attr("text-anchor", "middle")
     .attr("fill", "#94a3b8")
     .attr("font-size", 11)
-    .text(`Filtered projects: ${filtered.length}${state.selectedContinent ? ` • Continent: ${state.selectedContinent}` : ""}`);
+    .text(`Filtered projects: ${filtered.length}`);
+
+  // ---- Auto-zoom logic ----
+  if (state.filters.country) {
+    const f = countryFeatureByName.get(norm(state.filters.country));
+    if (f) zoomToFeature(capture, path, f, width, height);
+  } else if (state.selectedContinent) {
+    const ok = zoomToContinentPoints(capture, projection, width, height, state.selectedContinent, filtered);
+    if (!ok) zoomToContinent(capture, path, width, height, state.selectedContinent);
+  } else {
+    const t = state.mapTransform || d3.zoomIdentity;
+    const moved = Math.abs(t.x) > 0.5 || Math.abs(t.y) > 0.5 || (t.k || 1) > 1.01;
+    if (moved) {
+      state.mapTransform = d3.zoomIdentity;
+      capture.transition().duration(500).call(mapZoom.transform, state.mapTransform);
+    }
+  }
 }
 
-// ========= Render: Bar (UNCHANGED behaviour) =========
+
+// ========= Render: Bar =========
 function renderBar() {
   const { svg, width, height } = setSvgToPanel("#svg-bar", "vis-bar");
   svg.selectAll("*").remove();
@@ -296,7 +594,7 @@ function renderBar() {
     value: filteredBase.filter(d => isYes(d[t.col])).length
   })).filter(d => d.value > 0);
 
-  const margin = { top: 20, right: 20, bottom: 70, left: 50 };
+  const margin = { top: 20, right: 20, bottom: 88, left: 50 };
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
 
@@ -328,13 +626,24 @@ function renderBar() {
       renderAll();
     });
 
-  g.append("g")
+  const xAxis = g.append("g")
     .attr("transform", `translate(0,${innerH})`)
-    .call(d3.axisBottom(x))
-    .selectAll("text")
+    .call(d3.axisBottom(x));
+
+  xAxis.selectAll("text")
+    .style("font-size", "10px")
+    .attr("text-anchor", "end")
     .attr("transform", "rotate(-30)")
-    .style("text-anchor", "end")
-    .style("font-size", "10px");
+    .each(function(d) {
+      const [l1, l2] = splitTwoLines(d);
+      const sel = d3.select(this);
+      sel.text(null);
+
+      sel.append("tspan").attr("x", 0).attr("dy", "0em").text(l1);
+      if (l2) sel.append("tspan").attr("x", 0).attr("dy", "1.1em").text(l2);
+    })
+    .attr("dx", "-0.3em")
+    .attr("dy", "0.35em");
 
   g.append("g")
     .call(d3.axisLeft(y).ticks(4))
@@ -370,7 +679,7 @@ function renderDonut() {
     v => v.length,
     d => (d[COL_STATUS] ?? "Unknown").trim() || "Unknown"
   ).map(([status, value]) => ({ status, value }))
-   .sort((a,b)=>b.value-a.value);
+   .sort((a, b) => b.value - a.value);
 
   const r = Math.min(width, height) / 2 - 25;
 
@@ -407,6 +716,7 @@ function renderDonut() {
 
   const legendX = width - 210;
   const legendY = 20;
+
   const leg = svg.append("g").attr("transform", `translate(${legendX},${legendY})`);
 
   const rows = leg.selectAll("g")
@@ -456,9 +766,9 @@ function renderSankey() {
 
   if (!flows.length) {
     svg.append("text")
-      .attr("x", width/2).attr("y", height/2)
-      .attr("text-anchor","middle").attr("dominant-baseline","middle")
-      .attr("fill","#64748b").attr("font-size",14)
+      .attr("x", width / 2).attr("y", height / 2)
+      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("fill", "#64748b").attr("font-size", 14)
       .text("No data for current filters");
     return;
   }
@@ -552,6 +862,10 @@ function renderSankey() {
 // ========= Render All =========
 function renderAll() {
   renderMap();
+
+  // In expanded map mode, other panels may be collapsed -> avoid negative height warnings
+  if (appEl.classList.contains("mode-map")) return;
+
   renderSankey();
   renderBar();
   renderDonut();
@@ -560,43 +874,47 @@ function renderAll() {
 window.addEventListener("resize", renderAll);
 
 // ========= Load data (CSV + TopoJSON) =========
+function loadWorld() {
+  // Requires topojson-client in index.html:
+  // <script src="https://unpkg.com/topojson-client@3"></script>
+  return d3.json("data/world_countries_110m.topojson").then(topo => {
+    if (!topo || typeof topojson === "undefined") {
+      throw new Error("TopoJSON loaded but topojson-client not available (check script include)");
+    }
+    const objName = Object.keys(topo.objects)[0];
+    return topojson.feature(topo, topo.objects[objName]);
+  });
+}
+
 Promise.all([
   d3.csv("data/cleaned_data.csv"),
-  d3.json("data/world_countries_110m.topojson")
-]).then(([csv, topo]) => {
+  loadWorld()
+]).then(([csv, geo]) => {
   rawData = csv;
+  worldGeo = geo;
 
-  // --- Convert TopoJSON -> GeoJSON (auto-detect object name)
-  const objName = topo.objects?.ne_110m_admin_0_countries
-    ? "ne_110m_admin_0_countries"
-    : Object.keys(topo.objects || {})[0];
-
-  if (!objName) throw new Error("TopoJSON has no objects. Check the exported file.");
-
-  worldGeo = topojson.feature(topo, topo.objects[objName]);
-
-  // --- Build country -> continent lookup from properties
+  // Build lookups
   countryToContinent = new Map();
+  countryFeatureByName = new Map();
+
   worldGeo.features.forEach(f => {
-    const p = f.properties || {};
-    const name = p.ADMIN || p.NAME || p.name || p.NAME_EN || "";
-    const cont = p.CONTINENT || p.continent || "";
+    const { name, cont } = featureNameAndContinent(f);
+    if (name) countryFeatureByName.set(norm(name), f);
     if (name && cont) countryToContinent.set(norm(name), cont);
   });
 
-  // --- Common helpful aliases (extend if you spot mismatches)
+  // Helpful aliases (extend if needed)
   const alias = new Map([
     ["russia", "russian federation"],
     ["uk", "united kingdom"],
     ["usa", "united states of america"],
     ["united states", "united states of america"]
   ]);
-
   for (const [k, v] of alias.entries()) {
-    const vv = norm(v);
-    if (countryToContinent.has(vv)) {
-      countryToContinent.set(norm(k), countryToContinent.get(vv));
-    }
+    const cont = countryToContinent.get(norm(v));
+    const feat = countryFeatureByName.get(norm(v));
+    if (cont) countryToContinent.set(norm(k), cont);
+    if (feat) countryFeatureByName.set(norm(k), feat);
   }
 
   populateFiltersFromData();
