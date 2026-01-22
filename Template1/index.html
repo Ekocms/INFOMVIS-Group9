@@ -50,11 +50,16 @@
       <section class="panel bar" aria-label="Bar chart panel">
         <header class="panel__header">
           <h2 class="panel__title">Projects by NbS Type</h2>
+
+          <!-- NEW: info button in the bar panel header -->
+          <button id="btnBarInfo" class="panelInfoBtn" type="button" aria-label="Bar chart info">i</button>
         </header>
+
         <div id="vis-bar" class="panel__body">
           <svg id="svg-bar" class="vis-svg" aria-label="Bar chart"></svg>
         </div>
       </section>
+
 
       <!-- Bottom-middle: Donut -->
       <section class="panel donut" aria-label="Donut chart panel">
@@ -162,6 +167,29 @@
       </div>
     </div>
   </div>
+
+  <!-- Bar chart info modal -->
+  <div id="barInfoModal" class="miniModal hidden" aria-hidden="true">
+    <div id="barInfoBackdrop" class="miniModal__backdrop"></div>
+
+    <div class="miniModal__panel" role="dialog" aria-modal="true" aria-labelledby="barInfoTitle">
+      <div class="miniModal__header">
+        <div id="barInfoTitle" class="miniModal__title">How to read “Projects by NbS Type”</div>
+        <button id="barInfoClose" class="miniModal__close" type="button" aria-label="Close">✕</button>
+      </div>
+
+      <div class="miniModal__body">
+        <p><strong>What this shows:</strong> the number of projects that include each NbS Type in the current selection.</p>
+        <p><strong>Why other bars still appear:</strong> projects can belong to <em>multiple</em> NbS Types. Selecting one type filters the projects, but those projects may still count toward other types too.</p>
+        <p><strong>How to use it:</strong> click a bar (or its label) to filter all views by that NbS Type. Click again to clear.</p>
+      </div>
+
+      <div class="miniModal__footer">
+        <button id="barInfoOk" class="btn btn-primary" type="button">Got it</button>
+      </div>
+    </div>
+  </div>
+
 
   <!-- Your JS -->
   <script src="js/app.js"></script>

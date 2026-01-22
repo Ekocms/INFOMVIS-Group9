@@ -469,3 +469,174 @@ body{
 .compareCard__sub{
   overflow-wrap: anywhere;
 }
+
+/* =========================
+   Bar chart info button + modal
+   ========================= */
+
+.infoBtn{
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.infoBtn:hover{
+  background: #f8fafc;
+}
+
+.miniModal.hidden{ display: none; }
+
+.miniModal{
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
+.miniModal__backdrop{
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.miniModal__panel{
+  position: relative;
+  max-width: 520px;
+  width: calc(100% - 32px);
+  margin: 120px auto 0 auto;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+
+.miniModal__header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.miniModal__title{
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.miniModal__close{
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 10px;
+  width: 36px;
+  height: 32px;
+  cursor: pointer;
+}
+
+.miniModal__body{
+  padding: 12px 14px;
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.miniModal__body p{
+  margin: 0 0 10px 0;
+}
+
+.miniModal__footer{
+  padding: 12px 14px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: flex-end;
+  background: #fff;
+}
+
+/* Bar chart info button is already in the header (flex),
+   so do NOT absolutely position it. */
+#vis-bar{ position: static; }
+#btnBarInfo{ position: static; }
+
+
+/* Info button that sits in a panel header (e.g. bar chart) */
+.panelInfoBtn{
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 800;
+  cursor: pointer;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panelInfoBtn:hover{
+  background: #f8fafc;
+}
+
+/* Simple modal for the bar info */
+.barInfoBackdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  z-index: 9998;
+}
+
+.barInfoModal{
+  position: fixed;
+  z-index: 9999;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 32px));
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  padding: 14px 14px 12px;
+}
+
+.barInfoModal__head{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.barInfoModal__title{
+  font-weight: 800;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.barInfoModal__close{
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  cursor: pointer;
+}
+.barInfoModal__close:hover{ background:#f8fafc; }
+
+.barInfoModal__body{
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+

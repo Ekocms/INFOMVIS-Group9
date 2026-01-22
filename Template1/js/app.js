@@ -183,6 +183,40 @@ const elType      = document.getElementById("f-type");
 const elChallenge = document.getElementById("f-challenge");
 const elStatus    = document.getElementById("f-status");
 
+// ========= Bar chart info modal =========
+const btnBarInfo = document.getElementById("btnBarInfo");
+const barInfoModal = document.getElementById("barInfoModal");
+const barInfoBackdrop = document.getElementById("barInfoBackdrop");
+const barInfoClose = document.getElementById("barInfoClose");
+const barInfoOk = document.getElementById("barInfoOk");
+
+function openBarInfo() {
+  if (!barInfoModal) return;
+  barInfoModal.classList.remove("hidden");
+  barInfoModal.setAttribute("aria-hidden", "false");
+}
+
+function closeBarInfo() {
+  if (!barInfoModal) return;
+  barInfoModal.classList.add("hidden");
+  barInfoModal.setAttribute("aria-hidden", "true");
+}
+
+btnBarInfo?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  openBarInfo();
+});
+
+barInfoBackdrop?.addEventListener("click", closeBarInfo);
+barInfoClose?.addEventListener("click", closeBarInfo);
+barInfoOk?.addEventListener("click", closeBarInfo);
+
+// ESC closes it (without interfering with your main overlay ESC handler)
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeBarInfo();
+});
+
+
 
 // ========= Small UI helpers for filter panel =========
 function ensureCountryNote() {
