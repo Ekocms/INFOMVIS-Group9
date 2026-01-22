@@ -297,7 +297,16 @@ btnClearFilters.addEventListener("click", () => {
 // ========= Overlay: Fact builder + UI =========
 function rowIdentity(row) {
   // Best-effort unique-ish id for basket dedupe
-  const name = pickFirst(row, ["Project name", "Project Name", "Intervention name", "Intervention Name", "Name", "Title"]);
+  const name = pickFirst(row, [
+    "Name of the NBS intervention",
+    "Native title of the NBS intervention",
+    "Project name",
+    "Project Name",
+    "Intervention name",
+    "Intervention Name",
+    "Name",
+    "Title"
+  ]);
   const city = (row?.[COL_CITY] ?? "").trim();
   const country = (row?.[COL_COUNTRY] ?? "").trim();
   const status = (row?.[COL_STATUS] ?? "").trim();
@@ -307,7 +316,17 @@ function rowIdentity(row) {
 }
 
 function buildFact(row) {
-  const name = pickFirst(row, ["Project name", "Project Name", "Intervention name", "Intervention Name", "Name", "Title"]) || "Unnamed project";
+  const name = pickFirst(row, [
+    "Name of the NBS intervention",
+    "Native title of the NBS intervention",
+    "Project name",
+    "Project Name",
+    "Intervention name",
+    "Intervention Name",
+    "Name",
+    "Title"
+  ]) || "Unnamed project";
+
   const city = (row?.[COL_CITY] ?? "").trim();
   const country = (row?.[COL_COUNTRY] ?? "").trim();
   const status = (row?.[COL_STATUS] ?? "").trim() || "Unknown";
@@ -318,8 +337,18 @@ function buildFact(row) {
   const cost = pickFirst(row, ["Cost", "Costs", "Estimated cost", "Total cost", "Budget"]);
   const source = pickFirst(row, ["Source", "Sources", "Website", "URL", "Link", "Reference"]);
 
-  return { name, city, country, status, types, challenges, cost: String(cost ?? "").trim(), source: String(source ?? "").trim() };
+  return {
+    name,
+    city,
+    country,
+    status,
+    types,
+    challenges,
+    cost: String(cost ?? "").trim(),
+    source: String(source ?? "").trim()
+  };
 }
+
 
 function pillHTML(items) {
   const list = (items ?? []).filter(Boolean);
