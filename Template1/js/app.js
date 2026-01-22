@@ -149,7 +149,7 @@ const CHALLENGE_COLUMNS = [
 
 // ========= App State =========
 const state = {
-  filters: { country: "", typeLabel: "", status: "" },
+  filters: { country: "", typeLabel: "", challengeLabel: "", status: "" },
   selectedType: "",
   selectedStatus: "",
   selectedChallenge: "",
@@ -179,13 +179,53 @@ const btnClearFilters = document.getElementById("btnClearFilters");
 const filterForm = document.getElementById("filterForm");
 
 const elCountry = document.getElementById("f-country");
-const elType    = document.getElementById("f-type");
-const elStatus  = document.getElementById("f-status");
+const elType      = document.getElementById("f-type");
+const elChallenge = document.getElementById("f-challenge");
+const elStatus    = document.getElementById("f-status");
+
+
+// ========= Small UI helpers for filter panel =========
+function ensureCountryNote() {
+  if (!elCountry) return;
+  let note = document.getElementById("country-note");
+  if (!note) {
+    note = document.createElement("div");
+    note.id = "country-note";
+    note.className = "filter-note";
+    // lightweight styling (no CSS changes needed)
+    note.style.fontSize = "12px";
+    note.style.color = "var(--muted, #6b7280)";
+    note.style.lineHeight = "1.25";
+    note.style.marginTop = "-6px";
+    note.style.marginBottom = "10px";
+
+    // Insert directly after the country row if possible
+    const row = elCountry.closest(".row") || elCountry.parentElement;
+    if (row && row.parentNode) row.parentNode.insertBefore(note, row.nextSibling);
+    else filterForm?.appendChild(note);
+  }
+
+  note.textContent =
+    "Country list shows countries with projects in the current dataset (and current filters). " +
+    "If a country is not listed, there are no matching projects.";
+}
 
 // Overlay DOM
 const factOverlay = document.getElementById("factOverlay");
 const factOverlayBackdrop = document.getElementById("factOverlayBackdrop");
 const btnCloseOverlay = document.getElementById("btnCloseOverlay");
+// Make the overlay close button an "X" again (more discoverable)
+if (btnCloseOverlay) {
+  btnCloseOverlay.textContent = "✕";
+  btnCloseOverlay.setAttribute("aria-label", "Close");
+  btnCloseOverlay.style.fontSize = "18px";
+  btnCloseOverlay.style.lineHeight = "1";
+  btnCloseOverlay.style.width = "40px";
+  btnCloseOverlay.style.height = "34px";
+  btnCloseOverlay.style.display = "inline-flex";
+  btnCloseOverlay.style.alignItems = "center";
+  btnCloseOverlay.style.justifyContent = "center";
+}
 const btnCompareView = document.getElementById("btnCompareView");
 const compareCountEl = document.getElementById("compareCount");
 
@@ -193,11 +233,95 @@ const factTitle = document.getElementById("factTitle");
 const factSubtitle = document.getElementById("factSubtitle");
 const factPickerRow = document.getElementById("factPickerRow");
 const factPicker = document.getElementById("factPicker");
-const btnLoadPicked = document.getElementById("btnLoadPicked");
 
 const factCardHost = document.getElementById("factCardHost");
 const compareArea = document.getElementById("compareArea");
 const compareCards = document.getElementById("compareCards");
+
+
+function syncCompareButtonState() {
+  const isOpen = !compareArea.classList.contains("hidden");
+  // style.css uses [aria-pressed="true"] to keep it blue
+  btnCompareView?.setAttribute("aria-pressed", isOpen ? "true" : "false");
+}
+
+syncCompareButtonState();
+
+
+function ensureExplanations() {
+  // Small helper text to prevent “why are other bars still visible?” confusion:
+  // projects can have multiple types/challenges in this dataset.
+  const barPanel = document.getElementById("vis-bar");
+  if (barPanel && !document.getElementById("note-bar")) {
+    const div = document.createElement("div");
+    div.id = "note-bar";
+    div.style.marginTop = "6px";
+    div.style.fontSize = "12px";
+    div.style.color = "#64748b";
+    div.textContent = "Note: A project can belong to multiple NbS types, so selecting one type can still show counts for other types within the selected projects.";
+    barPanel.appendChild(div);
+  }
+
+  const sankeyPanel = document.getElementById("vis-sankey");
+  if (sankeyPanel && !document.getElementById("note-sankey")) {
+    const div = document.createElement("div");
+    div.id = "note-sankey";
+    div.style.marginTop = "6px";
+    div.style.fontSize = "12px";
+    div.style.color = "#64748b";
+    div.textContent = "How to read: Projects may address multiple challenges and use multiple NbS types. The Sankey shows total links between challenges and types.";
+    sankeyPanel.appendChild(div);
+  }
+}
+
+// Ensure helper text is present (safe to call multiple times)
+ensureExplanations();
+
+// ========= Filter summary (keeps right panel in sync with interactions) =========
+function ensureFilterSummary() {
+  const form = document.getElementById("filterForm");
+  if (!form) return;
+
+  // Place the summary right after the <hr /> inside the form (if present),
+  // otherwise append it at the end of the form.
+  let host = document.getElementById("filterSummary");
+  if (host) return;
+
+  host = document.createElement("div");
+  host.id = "filterSummary";
+  host.className = "hint";
+  host.style.marginTop = "8px";
+  host.style.marginBottom = "8px";
+
+  const hr = form.querySelector("hr");
+  if (hr && hr.parentNode) {
+    hr.parentNode.insertBefore(host, hr.nextSibling);
+  } else {
+    form.appendChild(host);
+  }
+}
+
+function updateFilterSummary() {
+  ensureFilterSummary();
+  const el = document.getElementById("filterSummary");
+  if (!el) return;
+
+  const parts = [];
+
+  // Show the user-visible filter values (dropdowns & linked-view selections).
+  const country = state.filters.country || state.selectedContinent || "";
+  const type = state.filters.typeLabel || state.selectedType || "";
+  const challenge = state.filters.challengeLabel || state.selectedChallenge || "";
+  const status = state.filters.status || state.selectedStatus || "";
+
+  if (country) parts.push(`Country/Region: ${country}`);
+  if (challenge) parts.push(`Challenge addressed: ${challenge}`);
+  if (type) parts.push(`NbS Type: ${type}`);
+  if (status) parts.push(`Status: ${status}`);
+
+  el.textContent = parts.length ? `Active filters: ${parts.join(" · ")}` : "Active filters: None";
+}
+
 
 // ========= Populate dropdowns from CSV =========
 function populateFiltersFromData() {
@@ -207,36 +331,49 @@ function populateFiltersFromData() {
 
   elType.innerHTML = `<option value="">All</option>` + TYPE_COLUMNS.map(t => `<option value="${t.label}">${t.label}</option>`).join("");
 
+  elChallenge.innerHTML = `<option value="">All</option>` + CHALLENGE_COLUMNS.map(c => `<option value="${c.label}">${c.label}</option>`).join("");
+
   const statuses = Array.from(new Set(rawData.map(d => (d[COL_STATUS] ?? "").trim()).filter(Boolean)))
     .sort((a, b) => a.localeCompare(b));
   elStatus.innerHTML = `<option value="">All</option>` + statuses.map(s => `<option value="${s}">${s}</option>`).join("");
 }
 
 // ========= Central filtering (used by ALL views) =========
-function applyAllFilters() {
+function applyAllFilters(opts = {}) {
+  const {
+    ignoreType = false,
+    ignoreChallenge = false,
+    ignoreStatus = false
+  } = opts;
+
   let filtered = rawData;
 
   // Dropdown filters
   if (state.filters.country) {
     filtered = filtered.filter(d => (d[COL_COUNTRY] ?? "") === state.filters.country);
   }
-  if (state.filters.status) {
+  if (!ignoreStatus && state.filters.status) {
     filtered = filtered.filter(d => (d[COL_STATUS] ?? "") === state.filters.status);
   }
-  if (state.filters.typeLabel) {
+  if (!ignoreType && state.filters.typeLabel) {
     const t = TYPE_COLUMNS.find(x => x.label === state.filters.typeLabel);
     if (t) filtered = filtered.filter(d => isYes(d[t.col]));
   }
+  if (!ignoreChallenge && state.filters.challengeLabel) {
+    const ch = CHALLENGE_COLUMNS.find(x => x.label === state.filters.challengeLabel);
+    if (ch) filtered = filtered.filter(d => isYes(d[ch.col]));
+  }
+
 
   // Cross-view selections
-  if (state.selectedType) {
+  if (!ignoreType && state.selectedType) {
     const t = TYPE_COLUMNS.find(x => x.label === state.selectedType);
     if (t) filtered = filtered.filter(d => isYes(d[t.col]));
   }
-  if (state.selectedStatus) {
+  if (!ignoreStatus && state.selectedStatus) {
     filtered = filtered.filter(d => (d[COL_STATUS] ?? "") === state.selectedStatus);
   }
-  if (state.selectedChallenge) {
+  if (!ignoreChallenge && state.selectedChallenge) {
     const ch = CHALLENGE_COLUMNS.find(x => x.label === state.selectedChallenge);
     if (ch) filtered = filtered.filter(d => isYes(d[ch.col]));
   }
@@ -266,12 +403,15 @@ filterForm.addEventListener("change", () => {
   const formData = new FormData(filterForm);
   const filters = Object.fromEntries(formData.entries());
 
-  state.filters.country   = filters.country ?? "";
-  state.filters.typeLabel = filters.type ?? "";
-  state.filters.status    = filters.status ?? "";
+  state.filters.country        = filters.country ?? "";
+  state.filters.typeLabel      = filters.type ?? "";
+  state.filters.challengeLabel = filters.challenge ?? "";
+  state.filters.status         = filters.status ?? "";
 
-  // If user uses dropdown "type", clear bar-click selection
-  if (state.filters.typeLabel) state.selectedType = "";
+  // Keep linked-view highlights aligned with the filter panel
+  state.selectedType      = state.filters.typeLabel;
+  state.selectedChallenge = state.filters.challengeLabel;
+  state.selectedStatus    = state.filters.status;
 
   // Selecting a country should override continent drilldown
   if (state.filters.country) state.selectedContinent = "";
@@ -282,7 +422,7 @@ filterForm.addEventListener("change", () => {
 btnClearFilters.addEventListener("click", () => {
   filterForm.reset();
 
-  state.filters = { country: "", typeLabel: "", status: "" };
+  state.filters = { country: "", typeLabel: "", challengeLabel: "", status: "" };
   state.selectedType = "";
   state.selectedStatus = "";
   state.selectedChallenge = "";
@@ -440,22 +580,25 @@ function openOverlayWithRows(rows) {
   state.overlay.activeRows = rows.slice();
   state.overlay.activeIndex = 0;
 
-  // picker setup if multiple
-  if (rows.length > 1) {
-    factPickerRow.classList.remove("hidden");
-    factPicker.innerHTML = "";
-    rows.forEach((r, idx) => {
-      const f = buildFact(r);
-      const loc = [f.city, f.country].filter(Boolean).join(", ");
-      const opt = document.createElement("option");
-      opt.value = String(idx);
-      opt.textContent = `${f.name}${loc ? " — " + loc : ""}`;
-      factPicker.appendChild(opt);
-    });
-  } else {
-    factPickerRow.classList.add("hidden");
-    factPicker.innerHTML = "";
-  }
+// picker setup if multiple
+if (rows.length > 1) {
+  factPickerRow.classList.remove("hidden");
+  factPicker.innerHTML = "";
+  rows.forEach((r, idx) => {
+    const f = buildFact(r);
+    const loc = [f.city, f.country].filter(Boolean).join(", ");
+    const opt = document.createElement("option");
+    opt.value = String(idx);
+    opt.textContent = `${f.name}${loc ? " — " + loc : ""}`;
+    factPicker.appendChild(opt);
+  });
+
+  // Ensure the first project is selected by default (auto-loaded without extra clicks)
+  factPicker.value = "0";
+} else {
+  factPickerRow.classList.add("hidden");
+  factPicker.innerHTML = "";
+}
 
   // show overlay
   state.overlay.isOpen = true;
@@ -467,6 +610,7 @@ function openOverlayWithRows(rows) {
 
   // compare summary
   renderCompare();
+  syncCompareButtonState();
 }
 
 function closeOverlay() {
@@ -474,6 +618,7 @@ function closeOverlay() {
   factOverlay.classList.add("hidden");
   factOverlay.setAttribute("aria-hidden", "true");
   compareArea.classList.add("hidden");
+  syncCompareButtonState();
 }
 
 function addToCompare(row) {
@@ -487,73 +632,114 @@ function removeFromCompareById(id) {
   state.overlay.compare = state.overlay.compare.filter(r => rowIdentity(r) !== id);
 }
 
+
 function renderCompare() {
   compareCountEl.textContent = String(state.overlay.compare.length);
 
-  // If compare area is toggled on, render it. Otherwise keep it hidden.
-  if (!compareArea.classList.contains("hidden")) {
-    compareCards.innerHTML = "";
+  // Only render if the compare area is visible
+  if (compareArea.classList.contains("hidden")) return;
 
-    state.overlay.compare.forEach(r => {
-      const id = rowIdentity(r);
-      const f = buildFact(r);
-      const loc = [f.city, f.country].filter(Boolean).join(", ") || f.country || "—";
+  compareCards.innerHTML = "";
 
-      const sourceHTML = /^https?:\/\//i.test(f.source)
-        ? `<a href="${escapeHtml(f.source)}" target="_blank" rel="noopener noreferrer">Open source</a>`
-        : escapeHtml(f.source || "—");
-
-      const card = document.createElement("div");
-      card.className = "compareCard";
-      card.innerHTML = `
-        <div class="compareCard__head">
-          <div>
-            <h3 class="compareCard__title">${escapeHtml(f.name)}</h3>
-            <p class="compareCard__sub">${escapeHtml(loc)}</p>
-          </div>
-          <button class="compareCard__remove" type="button" aria-label="Remove">✕</button>
-        </div>
-        <div class="compareCard__body">
-          <div class="factBlock">
-            <div class="factBlock__label">Status</div>
-            <div class="factBlock__value">${escapeHtml(f.status)}</div>
-          </div>
-
-          <div class="factBlock">
-            <div class="factBlock__label">NbS types</div>
-            <div class="factBlock__value"><div class="pills">${pillHTML(f.types)}</div></div>
-          </div>
-
-          <div class="factBlock">
-            <div class="factBlock__label">Challenges</div>
-            <div class="factBlock__value"><div class="pills">${pillHTML(f.challenges)}</div></div>
-          </div>
-
-          <div class="factBlock">
-            <div class="factBlock__label">Cost</div>
-            <div class="factBlock__value">${escapeHtml(f.cost || "—")}</div>
-          </div>
-
-          <div class="factBlock">
-            <div class="factBlock__label">Source</div>
-            <div class="factBlock__value">${sourceHTML}</div>
-          </div>
-        </div>
-      `;
-
-      card.querySelector(".compareCard__remove").addEventListener("click", () => {
-        removeFromCompareById(id);
-        renderCompare();
-
-        // also refresh main card if needed
-        const active = state.overlay.activeRows[state.overlay.activeIndex];
-        if (active) renderFactCard(active);
-      });
-
-      compareCards.appendChild(card);
-    });
+  const rows = state.overlay.compare;
+  if (!rows.length) {
+    compareCards.innerHTML = `<div style="color:#64748b;font-size:12px;padding:8px 2px;">No projects in the compare basket.</div>`;
+    return;
   }
+
+  // Build compare cards (same visual style as before)
+  rows.forEach(r => {
+    const id = rowIdentity(r);
+    const f = buildFact(r);
+    const loc = [f.city, f.country].filter(Boolean).join(", ") || f.country || "—";
+
+    const sourceHTML = /^https?:\/\//i.test(f.source)
+      ? `<a href="${escapeHtml(f.source)}" target="_blank" rel="noopener noreferrer">Open source</a>`
+      : escapeHtml(f.source || "—");
+
+    const card = document.createElement("div");
+    card.className = "compareCard";
+    card.innerHTML = `
+      <div class="compareCard__head">
+        <div class="compareCard__headText">
+          <h3 class="compareCard__title">${escapeHtml(f.name)}</h3>
+          <p class="compareCard__sub">${escapeHtml(loc)}</p>
+        </div>
+        <button class="compareCard__remove" type="button" aria-label="Remove from compare">✕</button>
+      </div>
+
+      <div class="compareCard__body">
+        <div class="factBlock">
+          <div class="factBlock__label">Status</div>
+          <div class="factBlock__value">${escapeHtml(f.status)}</div>
+        </div>
+
+        <div class="factBlock">
+          <div class="factBlock__label">Challenges addressed</div>
+          <div class="factBlock__value"><div class="pills">${pillHTML(f.challenges)}</div></div>
+        </div>
+
+        <div class="factBlock">
+          <div class="factBlock__label">NbS types</div>
+          <div class="factBlock__value"><div class="pills">${pillHTML(f.types)}</div></div>
+        </div>
+
+        <div class="factBlock">
+          <div class="factBlock__label">Cost</div>
+          <div class="factBlock__value">${escapeHtml(f.cost || "—")}</div>
+        </div>
+
+        <div class="factBlock">
+          <div class="factBlock__label">Source</div>
+          <div class="factBlock__value">${sourceHTML}</div>
+        </div>
+      </div>
+    `;
+
+    card.querySelector(".compareCard__remove").addEventListener("click", () => {
+      removeFromCompareById(id);
+      renderCompare();
+
+      // refresh main fact card so its "Compare" button state stays accurate
+      const active = state.overlay.activeRows[state.overlay.activeIndex];
+      if (active) renderFactCard(active);
+    });
+
+    compareCards.appendChild(card);
+  });
+
+  // After rendering, align row heights across cards so users can compare easily
+  alignCompareCardRows();
 }
+
+// Make the compare rows line up across cards (best-effort)
+// We measure each row (factBlock) across all cards and set a shared min-height per row index.
+function alignCompareCardRows() {
+  const cards = Array.from(compareCards.querySelectorAll(".compareCard"));
+  if (cards.length <= 1) return;
+
+  // Clear previous min-heights (e.g., when removing a card)
+  cards.forEach(card => {
+    card.querySelectorAll(".factBlock").forEach(b => b.style.minHeight = "");
+  });
+
+  // Collect blocks per row index
+  const perRow = [];
+  cards.forEach(card => {
+    const blocks = Array.from(card.querySelectorAll(".factBlock"));
+    blocks.forEach((b, i) => {
+      if (!perRow[i]) perRow[i] = [];
+      perRow[i].push(b);
+    });
+  });
+
+  // Compute max height per row and apply
+  perRow.forEach(blocks => {
+    const maxH = Math.max(...blocks.map(b => b.getBoundingClientRect().height));
+    blocks.forEach(b => (b.style.minHeight = `${maxH}px`));
+  });
+}
+
 
 // overlay events
 btnCloseOverlay.addEventListener("click", closeOverlay);
@@ -567,16 +753,20 @@ btnCompareView.addEventListener("click", () => {
   } else {
     compareArea.classList.add("hidden");
   }
+  syncCompareButtonState();
   renderCompare();
 });
 
-btnLoadPicked.addEventListener("click", () => {
+// Auto-load a project when user picks from the "multiple projects" dropdown
+factPicker.addEventListener("change", () => {
   const idx = parseInt(factPicker.value, 10);
   if (!Number.isFinite(idx)) return;
   if (idx < 0 || idx >= state.overlay.activeRows.length) return;
   state.overlay.activeIndex = idx;
   renderFactCard(state.overlay.activeRows[state.overlay.activeIndex]);
 });
+
+
 
 // ESC to close overlay
 window.addEventListener("keydown", (e) => {
@@ -673,7 +863,7 @@ function renderMap() {
   const { svg, width, height } = setSvgToPanel("#svg-map", "vis-map");
   svg.selectAll("*").remove();
 
-  const filtered = applyAllFilters();
+  const filtered = applyAllFilters({ ignoreStatus: true });
 
   if (!worldGeo) {
     svg.append("text").attr("x", width/2).attr("y", height/2).text("Map loading...")
@@ -694,7 +884,7 @@ function renderMap() {
 
   // Zoom Behavior (KEY: filter out clicks on dots so click works reliably)
   mapZoom = d3.zoom()
-    .scaleExtent([1, 8])
+    .scaleExtent([1, 20])
     .filter((event) => {
       const t = event.target;
       // allow wheel always
@@ -896,13 +1086,16 @@ function renderBar() {
   svg.selectAll("*").remove();
 
   const filteredBase = applyAllFilters();
+  // Keep the Y-axis scale stable even when a NbS Type is selected.
+  // We compute the axis maximum from the same filters, but ignoring the type-selection filter.
+  const filteredForScale = applyAllFilters({ ignoreType: true });
 
   const counts = TYPE_COLUMNS.map(t => ({
     type: t.label,
     value: filteredBase.filter(d => isYes(d[t.col])).length
-  })).filter(d => d.value > 0);
+  }));
 
-  const margin = { top: 20, right: 20, bottom: 88, left: 50 };
+  const margin = { top: 20, right: 20, bottom: 96, left: 60 };
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
 
@@ -911,8 +1104,12 @@ function renderBar() {
     .range([0, innerW])
     .padding(0.2);
 
+  const yMax = d3.max(
+    TYPE_COLUMNS.map(t => filteredForScale.filter(d => isYes(d[t.col])).length)
+  ) || 1;
+
   const y = d3.scaleLinear()
-    .domain([0, d3.max(counts, d => d.value) || 1])
+    .domain([0, yMax])
     .nice()
     .range([innerH, 0]);
 
@@ -929,8 +1126,8 @@ function renderBar() {
     .style("cursor", "pointer")
     .on("click", (_, d) => {
       state.selectedType = (state.selectedType === d.type) ? "" : d.type;
-      state.filters.typeLabel = "";
-      elType.value = "";
+      state.filters.typeLabel = state.selectedType;
+      elType.value = state.filters.typeLabel;
       renderAll();
     });
 
@@ -940,6 +1137,14 @@ function renderBar() {
 
   xAxis.selectAll("text")
     .style("font-size", "10px")
+    .style("cursor", "pointer")
+    .on("click", (event, typeLabel) => {
+      // Clicking the label should behave exactly like clicking the bar.
+      state.selectedType = (state.selectedType === typeLabel) ? "" : typeLabel;
+      state.filters.typeLabel = state.selectedType;
+      if (elType) elType.value = state.filters.typeLabel;
+      renderAll();
+    })
     .attr("text-anchor", "end")
     .attr("transform", "rotate(-30)")
     .each(function(d) {
@@ -957,6 +1162,27 @@ function renderBar() {
     .call(d3.axisLeft(y).ticks(4))
     .selectAll("text")
     .style("font-size", "10px");
+
+
+// Axis labels
+g.append("text")
+  .attr("x", innerW / 2)
+  .attr("y", innerH + 88)
+  .attr("text-anchor", "middle")
+  .attr("fill", "#64748b")
+  .attr("font-size", 11)
+  .attr("font-weight", "600")
+  .text("NbS Type");
+
+g.append("text")
+  .attr("transform", "rotate(-90)")
+  .attr("x", -innerH / 2)
+  .attr("y", -46)
+  .attr("text-anchor", "middle")
+  .attr("fill", "#64748b")
+  .attr("font-size", 11)
+  .attr("font-weight", "600")
+  .text("Number of projects");
 }
 
 // ========= Donut: static colors + legend + click status =========
@@ -990,7 +1216,7 @@ function renderDonut() {
   const { svg, width, height } = setSvgToPanel("#svg-donut", "vis-donut");
   svg.selectAll("*").remove();
 
-  const filtered = applyAllFilters();
+  const filtered = applyAllFilters({ ignoreStatus: true });
 
   const grouped = d3.rollups(
     filtered,
@@ -1111,10 +1337,31 @@ function renderSankey() {
     ch: f.source
   }));
 
-  const sankeyGen = d3.sankey()
-    .nodeWidth(12)
-    .nodePadding(12)
-    .extent([[10, 10], [width - 10, height - 26]]);
+  
+// Keep node ordering stable (predefined order, no re-sorting based on filtered values)
+const chOrder = new Map(challengeLabels.map((name, i) => [name, i]));
+const typeOrder = new Map(typeLabels.map((name, i) => [name, i]));
+const nodeOrder = (n) => (n.group === "challenge"
+  ? (chOrder.has(n.name) ? chOrder.get(n.name) : 9999)
+  : 10000 + (typeOrder.has(n.name) ? typeOrder.get(n.name) : 9999)
+);
+
+const sankeyGen = d3.sankey()
+  .nodeWidth(12)
+  .nodePadding(12)
+  // Ensure vertical order stays the same under filtering / interaction
+  .nodeSort((a, b) => nodeOrder(a) - nodeOrder(b))
+  // Keep link ordering stable too (reduces "jumping" in some layouts)
+  .linkSort((a, b) => {
+    const sa = nodeOrder(a.source);
+    const sb = nodeOrder(b.source);
+    if (sa !== sb) return sa - sb;
+    const ta = nodeOrder(a.target);
+    const tb = nodeOrder(b.target);
+    if (ta !== tb) return ta - tb;
+    return (a.value || 0) - (b.value || 0);
+  })
+  .extent([[10, 10], [width - 10, height - 26]]);
 
   const graph = sankeyGen({
     nodes: nodes.map(d => ({ ...d })),
@@ -1160,6 +1407,11 @@ function renderSankey() {
     .on("click", (_, d) => {
       if (d.group !== "challenge") return;
       state.selectedChallenge = (state.selectedChallenge === d.name) ? "" : d.name;
+
+      // Keep filter panel consistent with the linked-view selection.
+      state.filters.challengeLabel = state.selectedChallenge;
+      if (elChallenge) elChallenge.value = state.filters.challengeLabel;
+
       renderAll();
     });
 
@@ -1185,15 +1437,26 @@ function renderSankey() {
 function renderAll() {
   renderMap();
 
+  // Keep the right panel informative even in map mode
+  updateFilterSummary();
+
   // In expanded map mode, other panels may be collapsed -> avoid negative height warnings
   if (appEl.classList.contains("mode-map")) return;
 
   renderSankey();
   renderBar();
   renderDonut();
+
+  updateFilterSummary();
 }
 
-window.addEventListener("resize", renderAll);
+window.addEventListener("resize", () => {
+  renderAll();
+  if (!compareArea.classList.contains("hidden")) {
+    // keep compare rows aligned after resize
+    alignCompareCardRows();
+  }
+});
 
 // ========= Load data (CSV + TopoJSON) =========
 function loadWorld() {
@@ -1279,6 +1542,7 @@ Promise.all([
   });
 
   populateFiltersFromData();
+  ensureCountryNote();
   renderAll();
 
 }).catch(err => {

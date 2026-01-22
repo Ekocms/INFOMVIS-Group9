@@ -39,7 +39,7 @@
       <!-- Top-middle: Sankey -->
       <section class="panel sankey" aria-label="Sankey panel">
         <header class="panel__header">
-          <h2 class="panel__title">Challenge → Type</h2>
+          <h2 class="panel__title">Challenge → NbS Type</h2>
         </header>
         <div id="vis-sankey" class="panel__body">
           <svg id="svg-sankey" class="vis-svg" aria-label="Sankey"></svg>
@@ -49,7 +49,7 @@
       <!-- Bottom-left: Bar -->
       <section class="panel bar" aria-label="Bar chart panel">
         <header class="panel__header">
-          <h2 class="panel__title">Projects by Type</h2>
+          <h2 class="panel__title">Projects by NbS Type</h2>
         </header>
         <div id="vis-bar" class="panel__body">
           <svg id="svg-bar" class="vis-svg" aria-label="Bar chart"></svg>
@@ -84,11 +84,21 @@
           <select id="f-country" name="country" class="form-select">
             <option value="">All</option>
           </select>
+          <p class="hint" style="margin-top:6px;">
+            Not all countries appear here — the list is based on what exists in the dataset (and some country names may be grouped or missing coordinates).
+          </p>
         </div>
 
         <div class="filter-block">
-          <label class="filter-label" for="f-type">Type</label>
+          <label class="filter-label" for="f-type">NbS Type</label>
           <select id="f-type" name="type" class="form-select">
+            <option value="">All</option>
+          </select>
+        </div>
+
+        <div class="filter-block">
+          <label class="filter-label" for="f-challenge">Challenge addressed</label>
+          <select id="f-challenge" name="challenge" class="form-select">
             <option value="">All</option>
           </select>
         </div>
@@ -103,7 +113,7 @@
         <hr />
 
         <p class="hint">
-          Tip: select a bar (type) to update all views.
+          Tip: selecting a NbS Type (bar or filter) updates all views.
         </p>
 
       </form>
@@ -123,12 +133,10 @@
         </div>
 
         <div class="factOverlay__actions">
-          <button id="btnCompareView" class="btn btn-sm btn-outline-primary" type="button">
+          <button id="btnCompareView" class="btn btn-sm btn-outline-primary" type="button" aria-pressed="false">
             Compare (<span id="compareCount">0</span>/3)
           </button>
-          <button id="btnCloseOverlay" class="btn btn-sm btn-outline-secondary" type="button">
-            Close
-          </button>
+          <button id="btnCloseOverlay" class="btn btn-sm btn-outline-secondary" type="button" aria-label="Close">✕</button>
         </div>
       </div>
 
@@ -136,7 +144,7 @@
       <div id="factPickerRow" class="factPickerRow hidden">
         <div class="factPickerRow__label">Multiple projects at this location:</div>
         <select id="factPicker" class="form-select form-select-sm factPickerRow__select"></select>
-        <button id="btnLoadPicked" class="btn btn-sm btn-primary" type="button">Load</button>
+        <!-- Load button removed: selection will auto-load via JS -->
       </div>
 
       <div class="factOverlay__body">

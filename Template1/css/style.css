@@ -341,6 +341,7 @@ body{
   color: #64748b;
 }
 
+/* Compare area hosts a single scroll container (matrix). Make it full width. */
 .compareCards{
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -349,6 +350,38 @@ body{
 @media (max-width: 980px){
   .compareCards{ grid-template-columns: 1fr; }
 }
+
+
+.compareScroll{
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;     /* no sideways scroll */
+  overflow-y: auto;
+  display: block;
+}
+
+.compareMatrix{
+  display: grid;
+  gap: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 2px 10px rgba(0,0,0,.06);
+
+  width: 100%;            /* fixed to modal width */
+  max-width: 100%;
+}
+
+.compareMatrix__cell{
+  padding: 10px 12px;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  min-width: 0;
+  overflow-wrap: anywhere;  /* prevents sideways growth */
+  word-break: break-word;
+}
+
 
 .compareCard{
   border: 1px solid #e5e7eb;
@@ -390,4 +423,49 @@ body{
   padding: 10px 12px;
   display: grid;
   gap: 10px;
+}
+
+/* =========================
+   UX tweaks from feedback
+   ========================= */
+
+/* 10) Keep Compare button visually active when basket is open */
+#btnCompareView[aria-pressed="true"]{
+  background: #0d6efd;       /* Bootstrap primary */
+  border-color: #0d6efd;
+  color: #ffffff;
+}
+#btnCompareView[aria-pressed="true"]:hover{
+  filter: brightness(0.96);
+  color: #ffffff;
+}
+
+/* 3) Comparison cards: make rows line up across up-to-3 columns */
+.compareCard__body{
+  /* If each compare card renders the same set of blocks in the same order,
+     this makes each row take equal height across columns. */
+  grid-auto-rows: 1fr;
+}
+.compareCard__body .factBlock{
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+/* Teammate feedback: long project names in compare basket header */
+.factCard__head > :first-child,
+.compareCard__head > :first-child{
+  flex: 1 1 auto;
+  min-width: 0; /* allows wrapping instead of overflow */
+}
+
+.factCard__title,
+.compareCard__title{
+  white-space: normal;
+  overflow-wrap: anywhere; /* break very long words / IDs */
+}
+
+.factCard__sub,
+.compareCard__sub{
+  overflow-wrap: anywhere;
 }
