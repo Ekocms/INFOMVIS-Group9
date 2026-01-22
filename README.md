@@ -102,14 +102,6 @@ Key design principles applied in this tool include:
   
   Geocoded project locations (latitude and longitude).
 
-### Other Required Files
-- Persona Selection: Persona Selection.docx
-- Data Wrangling: data_cleaning.ipynb
-- Data Understanding: VIS_visualization.ipynb
-- Sketches: 
-- Interface Design: Final theoretical design.docx
-- Think-Aloud study：
-
 ## How to Run the Project
 This project must be run via a local web server in order to load the CSV data correctly.
 
