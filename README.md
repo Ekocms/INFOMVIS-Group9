@@ -10,7 +10,7 @@ The tool allows users to:
 - Filter projects dynamically across all views
 - Compare up to three projects side-by-side using aligned attributes
 
-###Visualisations
+### Visualisations
 
 1. Projects by Continent (Map)
 - Displays the number of projects per continent
