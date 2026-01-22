@@ -85,8 +85,34 @@ function splitTwoLines(label) {
   return [line1, line2];
 }
 
+function getLargestPolygonCentroid(feature, path) {
+  if (feature.geometry.type === "Polygon") {
+    return path.centroid(feature);
+  }
+  
+  if (feature.geometry.type === "MultiPolygon") {
+    let bestPoly = null;
+    let maxArea = 0;
+    
+    feature.geometry.coordinates.forEach(coords => {
+      const poly = { type: "Polygon", coordinates: coords };
+      const area = d3.geoArea(poly);
+      
+      if (area > maxArea) {
+        maxArea = area;
+        bestPoly = poly;
+      }
+    });
+    
+    if (bestPoly) return path.centroid(bestPoly);
+  }
+  
+  return path.centroid(feature);
+}
+
 // ========= Columns (from your CSV) =========
 const COL_COUNTRY = "Country";
+const COL_CITY    = "City";
 const COL_STATUS  = "Present stage of the intervention";
 const COL_LAT     = "lat";
 const COL_LON     = "lon";
@@ -343,242 +369,202 @@ function renderMap() {
   const filtered = applyAllFilters();
 
   if (!worldGeo) {
-    svg.append("text")
-      .attr("x", width / 2).attr("y", height / 2)
-      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
-      .attr("fill", "#64748b").attr("font-size", 14)
-      .text("Map loading...");
+    svg.append("text").attr("x", width/2).attr("y", height/2).text("Map loading...")
+      .attr("text-anchor","middle").attr("fill","#64748b");
     return;
   }
 
-  // Projection + path
   const projection = d3.geoMercator();
   const path = d3.geoPath(projection);
   projection.fitExtent([[10, 10], [width - 10, height - 40]], worldGeo);
 
   // Zoom capture layer
-  const capture = svg.append("rect")
-    .attr("class", "zoom-capture")
-    .attr("x", 0).attr("y", 0)
-    .attr("width", width).attr("height", height)
-    .attr("fill", "transparent")
-    .style("pointer-events", "all");
-
-  // Base group (transformed)
+  const capture = svg.append("rect").attr("class", "zoom-capture")
+    .attr("width", width).attr("height", height).attr("fill", "transparent").style("pointer-events", "all");
+  
   const gBase = svg.append("g").attr("class", "map-base");
-  // UI overlay (not transformed)
   const gUI = svg.append("g").attr("class", "map-ui");
 
-  // Zoom behavior
-  mapZoom = d3.zoom()
-    .scaleExtent([1, 8])
-    .on("zoom", (event) => {
-      state.mapTransform = event.transform;
-      gBase.attr("transform", state.mapTransform);
-    });
+  // Zoom Behavior
+  mapZoom = d3.zoom().scaleExtent([1, 8]).on("zoom", e => {
+    state.mapTransform = e.transform;
+    const k = state.mapTransform.k;
 
-  capture.call(mapZoom);
-  capture.call(mapZoom.transform, state.mapTransform || d3.zoomIdentity);
+    gBase.attr("transform", state.mapTransform);
 
-  // Draw countries
-  gBase.append("g")
-    .selectAll("path")
-    .data(worldGeo.features)
-    .join("path")
+    gBase.selectAll(".semantic-zoom-group")
+      .attr("transform", d => `translate(${d.x}, ${d.y}) scale(${1/k})`);
+  });
+
+  svg.call(mapZoom)
+     .call(mapZoom.transform, state.mapTransform || d3.zoomIdentity)
+     .on("dblclick.zoom", null); // Optional: Disable double-click zoom
+
+  // Draw Countries
+  gBase.append("g").selectAll("path").data(worldGeo.features).join("path")
     .attr("d", path)
-    .attr("fill", "#f8fafc")
+    .attr("fill", d => {
+      const n = norm(d.properties.ADMIN || d.properties.NAME || d.properties.name);
+      
+      // Highlight Selected Country
+      if (state.filters.country) {
+        const filterName = norm(state.filters.country);
+        const targetFeat = countryFeatureByName.get(filterName);
+        if (targetFeat === d) return "#1d4ed8"; // Active Blue
+      }
+      return "#f8fafc"; // Default Gray
+    })
     .attr("stroke", "#cbd5e1")
-    .attr("stroke-width", 0.6);
+    .attr("stroke-width", 0.6)
+    .attr("vector-effect", "non-scaling-stroke");
 
-  // ---- Dots (continent hard-cut using bbox, no clipping) ----
-  const showDots =
-    !!state.filters.country ||
-    !!state.selectedContinent ||
-    appEl.classList.contains("mode-map");
+  const isWorld = !state.selectedContinent;
+  const isContinent = state.selectedContinent && !state.filters.country;
+  const isCountry = !!state.filters.country;
 
-  let dots = [];
+  const currentK = state.mapTransform?.k || 1;
 
-  if (showDots) {
-    // Determine continent bbox (only when continent drilldown is active)
-    const bbox =
-      state.filters.country
-        ? null
-        : (state.selectedContinent ? CONTINENT_BBOX.get(state.selectedContinent) : null);
+  // --- LEVEL 1 & 2: AGGREGATED BUBBLES FOR CONTINENT AND COUNTRY ---
+  if (!isCountry) {
+    let bubbleData = [];
 
-    dots = filtered
-      .map(row => {
-        const lat = +row[COL_LAT];
-        const lon = +row[COL_LON];
-        if (!isFiniteNumber(lat) || !isFiniteNumber(lon)) return null;
+    if (isWorld) {
+      // Continent Level
+      const contCounts = d3.rollups(filtered, v => v.length, d => countryToContinent.get(norm(d[COL_COUNTRY])) || "Unknown")
+        .map(([c, v]) => ({ key: c, value: v })).filter(d => d.key !== "Unknown").sort((a,b)=>b.value-a.value);
+      
+      const anchors = new Map([
+        ["Africa", [20, 5]], ["Europe", [15, 52]], ["Asia", [95, 40]],
+        ["North America", [-100, 45]], ["South America", [-60, -15]], ["Oceania", [135, -25]]
+      ]);
 
-        // Hide out-of-continent points (for continent drilldown only)
-        if (bbox && !inBBox(lon, lat, bbox, 0.5)) return null;
-
-        const p = projection([lon, lat]);
-        if (!p) return null;
-
-        return { x: p[0], y: p[1], row };
-      })
-      .filter(Boolean);
-
-    const gDots = gBase.append("g")
-      .attr("class", "map-dots");
-
-    gDots.selectAll("circle")
-      .data(dots)
-      .join("circle")
-      .attr("cx", d => d.x)
-      .attr("cy", d => d.y)
-      .attr("r", 3.4)
-      .attr("fill", "#ef4444")
-      .attr("opacity", 0.85)
-      .attr("stroke", "#ffffff")
-      .attr("stroke-width", 0.8)
-      .style("cursor", "pointer")
-      .on("click", (_, d) => {
-        console.log("Clicked project row:", d.row);
-      });
-
-    // Optional debug (only when Europe is selected)
-    if (state.selectedContinent === "Europe") {
-      const bad = dots
-        .filter(d => {
-          const lon = +d.row[COL_LON];
-          const lat = +d.row[COL_LAT];
-          const inEuropeBox = (lon >= -25 && lon <= 45 && lat >= 34 && lat <= 72);
-          return !inEuropeBox;
-        })
-        .slice(0, 20)
-        .map(d => ({
-          Country: d.row[COL_COUNTRY],
-          lat: d.row[COL_LAT],
-          lon: d.row[COL_LON],
-          Status: d.row[COL_STATUS]
-        }));
-      console.log("Europe rows with out-of-Europe coords (sample 20):", bad);
-    }
-  }
-
-  // ---- Continent bubbles (ONLY when no drilldown) ----
-  const inDrilldown = !!state.selectedContinent || !!state.filters.country;
-  const showBubbles = !inDrilldown;
-
-  if (showBubbles) {
-    const contCounts = d3.rollups(
-      filtered,
-      v => v.length,
-      d => countryToContinent.get(norm(d[COL_COUNTRY])) || "Unknown"
-    )
-      .map(([continent, value]) => ({ continent, value }))
-      .filter(d => d.continent !== "Unknown")
-      .sort((a, b) => b.value - a.value);
-
-    const anchors = new Map([
-      ["Africa", [20, 5]],
-      ["Europe", [15, 52]],
-      ["Asia", [95, 40]],
-      ["North America", [-100, 45]],
-      ["South America", [-60, -15]],
-      ["Oceania", [135, -25]]
-    ]);
-
-    const gBubbles = gBase.append("g").attr("class", "continent-bubbles");
-
-    const bubble = gBubbles.selectAll("g.bubble")
-      .data(contCounts)
-      .join("g")
-      .attr("class", "bubble")
-      .style("cursor", "pointer")
-      .style("pointer-events", "all")
-      .each(function(d) {
-        const ll = anchors.get(d.continent);
-        if (!ll) return;
+      bubbleData = contCounts.map(d => {
+        const ll = anchors.get(d.key);
+        if(!ll) return null;
         const [x, y] = projection(ll);
-        d.__x = x;
-        d.__y = y;
-      })
-      .attr("transform", d => `translate(${d.__x || 0},${d.__y || 0})`)
-      .on("click", (_, d) => {
-        state.selectedContinent = d.continent;
-        state.filters.country = "";
-        elCountry.value = "";
-        renderAll();
-      });
+        return { ...d, x, y, type: 'continent' };
+      }).filter(Boolean);
 
-    bubble.append("circle")
-      .attr("r", 16)
-      .attr("fill", "#ef4444")
-      .attr("opacity", 0.92);
+    } else {
+      // Country Level
+      const countryCounts = d3.rollups(filtered, v => v.length, d => d[COL_COUNTRY])
+        .map(([c, v]) => ({ key: c, value: v })).sort((a,b)=>b.value-a.value);
+      
+      bubbleData = countryCounts.map(d => {
+        const feat = countryFeatureByName.get(norm(d.key));
+        if(!feat) return null;
+        
+        const c = getLargestPolygonCentroid(feat, path);
+        return { ...d, x: c[0], y: c[1], type: 'country' };
+      }).filter(Boolean);
+    }
 
-    bubble.append("text")
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "middle")
-      .attr("fill", "#ffffff")
-      .attr("font-size", 11)
-      .attr("font-weight", 700)
-      .text(d => String(d.value));
+    const maxVal = d3.max(bubbleData, d => d.value) || 1;
+    const rScale = d3.scaleSqrt().domain([0, maxVal]).range([8, 20]);
 
-    gBubbles.raise();
-  }
-
-  // ---- Back button ----
-  if (shouldShowBackButton()) {
-    const backG = gUI.append("g")
-      .attr("class", "map-back")
+    const bubbles = gBase.append("g").selectAll("g")
+      .data(bubbleData).join("g")
+      .attr("class", "semantic-zoom-group")
+      .attr("transform", d => `translate(${d.x}, ${d.y}) scale(${1 / currentK})`)
       .style("cursor", "pointer")
-      .on("click", () => {
-        state.selectedContinent = "";
-        state.filters.country = "";
-        elCountry.value = "";
-
-        state.mapTransform = d3.zoomIdentity;
+      .on("click", (e, d) => {
+        e.stopPropagation();
+        if (d.type === 'continent') {
+          state.selectedContinent = d.key;
+        } else {
+          state.filters.country = d.key;
+          elCountry.value = d.key;
+        }
         renderAll();
       });
 
-    backG.append("rect")
-      .attr("x", 12)
-      .attr("y", 12)
-      .attr("rx", 8)
-      .attr("width", 88)
-      .attr("height", 30)
-      .attr("fill", "#ffffff")
-      .attr("stroke", "#cbd5e1");
+    bubbles.append("circle")
+      .attr("r", d => rScale(d.value))
+      .attr("fill", "#ef4444").attr("stroke", "#fff").attr("stroke-width", 1.5).attr("opacity", 0.9);
 
-    backG.append("text")
-      .attr("x", 56)
-      .attr("y", 27)
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "middle")
-      .attr("fill", "#334155")
-      .attr("font-size", 12)
-      .attr("font-weight", 600)
-      .text("Back");
+    bubbles.append("text")
+      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("fill", "white").attr("font-weight", "bold").attr("font-size", 11)
+      .text(d => d.value);
+
+    // Label below bubble
+    bubbles.append("text")
+      .attr("y", d => rScale(d.value) + 12)
+      .attr("text-anchor", "middle").attr("fill", "#334155").attr("font-size", 11).attr("font-weight", "600")
+      .style("text-shadow", "0 1px 2px white, 0 0 3px white")
+      .text(d => d.key);
   }
 
-  // Hint
-  gUI.append("text")
-    .attr("x", width / 2)
-    .attr("y", height - 12)
-    .attr("text-anchor", "middle")
-    .attr("fill", "#94a3b8")
-    .attr("font-size", 11)
-    .text(`Filtered projects: ${filtered.length}`);
+  // --- LEVEL 3: PROJECT DOTS ---
+  if (isCountry) {
+    const locationGroups = d3.rollups(filtered, v => v.length, d => d[COL_LON] + "::" + d[COL_LAT]);
 
-  // ---- Auto-zoom logic ----
-  if (state.filters.country) {
+    const dotData = locationGroups.map(([key, count]) => {
+      const [lonStr, latStr] = key.split("::");
+      const p = projection([+lonStr, +latStr]);
+      return p ? { x: p[0], y: p[1], count } : null;
+    }).filter(Boolean);
+
+    const dots = gBase.append("g").selectAll("g")
+      .data(dotData).join("g")
+      .attr("class", "semantic-zoom-group")
+      .attr("transform", d => `translate(${d.x}, ${d.y}) scale(${1 / currentK})`)
+      .style("cursor", "pointer");
+
+    // Dot Size
+    dots.append("circle")
+      .attr("r", d => d.count > 1 ? 7 : 4) 
+      .attr("fill", "#ef4444").attr("stroke", "white").attr("stroke-width", 1.5);
+
+    // Count Label
+    dots.filter(d => d.count > 1).append("text")
+      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("fill", "white").attr("font-size", 10).attr("font-weight", "bold")
+      .text(d => d.count);
+      
+    // Tooltip
+    dots.append("title").text(d => `${d.count} Project(s) here`);
+  }
+
+  // --- AUTO-ZOOM ---
+  if (isCountry) {
     const f = countryFeatureByName.get(norm(state.filters.country));
     if (f) zoomToFeature(capture, path, f, width, height);
-  } else if (state.selectedContinent) {
+  } else if (isContinent) {
     const ok = zoomToContinentPoints(capture, projection, width, height, state.selectedContinent, filtered);
     if (!ok) zoomToContinent(capture, path, width, height, state.selectedContinent);
   } else {
-    const t = state.mapTransform || d3.zoomIdentity;
-    const moved = Math.abs(t.x) > 0.5 || Math.abs(t.y) > 0.5 || (t.k || 1) > 1.01;
-    if (moved) {
+    // Reset World
+    const t = state.mapTransform;
+    if (Math.abs(t.x) > 0.5 || Math.abs(t.y) > 0.5 || t.k > 1.01) {
       state.mapTransform = d3.zoomIdentity;
-      capture.transition().duration(500).call(mapZoom.transform, state.mapTransform);
+      svg.transition().duration(750).call(mapZoom.transform, d3.zoomIdentity);
     }
   }
+
+  // --- UI: BACK BUTTON ---
+  if (shouldShowBackButton()) {
+    const backG = gUI.append("g").style("cursor", "pointer")
+      .on("click", () => {
+        if (state.filters.country) {
+          state.filters.country = "";
+          elCountry.value = "";
+        } else if (state.selectedContinent) {
+          state.selectedContinent = "";
+        } else {
+          state.mapTransform = d3.zoomIdentity;
+        }
+        renderAll();
+      });
+
+    backG.append("rect").attr("x", 12).attr("y", 12).attr("rx", 6).attr("width", 80).attr("height", 30)
+      .attr("fill", "white").attr("stroke", "#cbd5e1");
+    backG.append("text").attr("x", 52).attr("y", 28).attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("fill", "#334155").attr("font-size", 12).attr("font-weight", "600").text("← Back");
+  }
+
+  gUI.append("text").attr("x", width/2).attr("y", height - 12).attr("text-anchor", "middle").attr("fill", "#94a3b8").attr("font-size", 11)
+    .text(`Filtered projects: ${filtered.length}`);
 }
 
 
@@ -890,10 +876,33 @@ Promise.all([
   d3.csv("data/cleaned_data.csv"),
   loadWorld()
 ]).then(([csv, geo]) => {
-  rawData = csv;
+
+  const locationLookUp = new Map();
+
+  rawData = csv.map(d => {
+    const city = norm(d[COL_CITY]);
+    const country = norm(d[COL_COUNTRY]);
+    const lat = parseFloat(d[COL_LAT]);
+    const lon = parseFloat(d[COL_LON]);
+
+    const key = `${city}::${country}`;
+
+    // Reuse stored coordinates if available
+    if (locationLookUp.has(key)) {
+      const stored = locationLookUp.get(key);
+      d[COL_LAT] = stored.lat;
+      d[COL_LON] = stored.lon;
+    } 
+    else if (isFiniteNumber(lat) && isFiniteNumber(lon)) {
+      // First time seeing this city -> store as canonical
+      locationLookUp.set(key, { lat, lon });
+    }
+
+    return d;
+  });
+
   worldGeo = geo;
 
-  // Build lookups
   countryToContinent = new Map();
   countryFeatureByName = new Map();
 
@@ -917,8 +926,35 @@ Promise.all([
     if (feat) countryFeatureByName.set(norm(k), feat);
   }
 
+  rawData.forEach(d => {
+    const lon = +d[COL_LON];
+    const lat = +d[COL_LAT];
+    const country = d[COL_COUNTRY];
+
+    if (!isFiniteNumber(lat) || !isFiniteNumber(lon)) return;
+
+    const feat = countryFeatureByName.get(norm(country));
+    if (!feat) return; // no country polygon
+
+    if (!d3.geoContains(feat, [lon, lat])) {
+      console.warn(
+        "Point outside country polygon, fixing:",
+        d[COL_CITY],
+        country,
+        lat,
+        lon
+      );
+
+      const centroid = d3.geoCentroid(feat);
+      d[COL_LON] = centroid[0];
+      d[COL_LAT] = centroid[1];
+    }
+  });
+
   populateFiltersFromData();
   renderAll();
+
 }).catch(err => {
   console.error("Data load failed:", err);
 });
+
