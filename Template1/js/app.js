@@ -118,7 +118,7 @@ function pickFirst(row, candidates) {
   return "";
 }
 
-// ========= Columns (from your CSV) =========
+// ========= Columns (from CSV) =========
 const COL_COUNTRY = "Country";
 const COL_CITY    = "City";
 const COL_STATUS  = "Present stage of the intervention";
@@ -211,7 +211,7 @@ barInfoBackdrop?.addEventListener("click", closeBarInfo);
 barInfoClose?.addEventListener("click", closeBarInfo);
 barInfoOk?.addEventListener("click", closeBarInfo);
 
-// ESC closes it (without interfering with your main overlay ESC handler)
+// ESC closes it (without interfering with main overlay ESC handler)
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeBarInfo();
 });
@@ -248,7 +248,7 @@ function ensureCountryNote() {
 const factOverlay = document.getElementById("factOverlay");
 const factOverlayBackdrop = document.getElementById("factOverlayBackdrop");
 const btnCloseOverlay = document.getElementById("btnCloseOverlay");
-// Make the overlay close button an "X" again (more discoverable)
+// Make the overlay close button an "X" (more discoverable)
 if (btnCloseOverlay) {
   btnCloseOverlay.textContent = "✕";
   btnCloseOverlay.setAttribute("aria-label", "Close");
