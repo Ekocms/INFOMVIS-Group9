@@ -92,15 +92,12 @@ Key design principles applied in this tool include:
   Custom styling for dashboard layout, panels, filters, and overlays.
 
 ### Data Files
-- cleaned_data.csv / cleaned_data.xlsx:
+- cleaned_data.csv:
   
   Cleaned NbS project dataset derived from the Naturvation Atlas.
 - world_countries_110m.topojson:
   
   World map geometry used for the geographic visualization.
-- geocoded_*.csv:
-  
-  Geocoded project locations (latitude and longitude).
 
 ## How to Run the Project
 This project must be run via a local web server in order to load the CSV data correctly.
