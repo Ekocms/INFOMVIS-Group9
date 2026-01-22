@@ -11,7 +11,7 @@ The tool allows users to:
 - Compare up to three projects side-by-side using aligned attributes
 
 ### Visualisations
-
+--------------
 1. Projects by Continent (Map)
 - Displays the number of projects per continent
 - Clicking a continent filters all other views
@@ -34,7 +34,7 @@ The tool allows users to:
 - Non-selected segments are visually muted to preserve context
 
 ### Filters
-
+--------------
 Users can filter projects by:
 - Country
 - NbS Type
@@ -44,7 +44,7 @@ Users can filter projects by:
 Active filters are displayed to support transparency and user understanding.
 
 ### Comparison Feature
-
+--------------
 Users can add up to three projects to a comparison basket.
 
 Comparison design characteristics:
@@ -54,7 +54,7 @@ Comparison design characteristics:
 - Projects can be removed individually from the comparison
 
 ### Design Rationale
-
+--------------
 Key design principles applied in this tool include:
 - Coordinated multiple views: interactions in one view update all others
 - Context preservation: non-selected elements are muted rather than removed
