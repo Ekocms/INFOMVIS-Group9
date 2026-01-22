@@ -56,7 +56,6 @@ function inBBox(lon, lat, bbox, pad = 0) {
   );
 }
 
-
 // Split a label into 2 lines (best-effort) for axis tick labels
 function splitTwoLines(label) {
   const s = String(label ?? "").trim();
@@ -89,25 +88,34 @@ function getLargestPolygonCentroid(feature, path) {
   if (feature.geometry.type === "Polygon") {
     return path.centroid(feature);
   }
-  
+
   if (feature.geometry.type === "MultiPolygon") {
     let bestPoly = null;
     let maxArea = 0;
-    
+
     feature.geometry.coordinates.forEach(coords => {
       const poly = { type: "Polygon", coordinates: coords };
       const area = d3.geoArea(poly);
-      
+
       if (area > maxArea) {
         maxArea = area;
         bestPoly = poly;
       }
     });
-    
+
     if (bestPoly) return path.centroid(bestPoly);
   }
-  
+
   return path.centroid(feature);
+}
+
+function pickFirst(row, candidates) {
+  for (const k of candidates) {
+    const v = row?.[k];
+    if (v === 0) return v;
+    if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+  }
+  return "";
 }
 
 // ========= Columns (from your CSV) =========
@@ -146,7 +154,15 @@ const state = {
   selectedStatus: "",
   selectedChallenge: "",
   selectedContinent: "",
-  mapTransform: d3.zoomIdentity
+  mapTransform: d3.zoomIdentity,
+
+  // popup + compare
+  overlay: {
+    isOpen: false,
+    activeRows: [],
+    activeIndex: 0,
+    compare: [] // max 3
+  }
 };
 
 // ========= Data =========
@@ -165,6 +181,23 @@ const filterForm = document.getElementById("filterForm");
 const elCountry = document.getElementById("f-country");
 const elType    = document.getElementById("f-type");
 const elStatus  = document.getElementById("f-status");
+
+// Overlay DOM
+const factOverlay = document.getElementById("factOverlay");
+const factOverlayBackdrop = document.getElementById("factOverlayBackdrop");
+const btnCloseOverlay = document.getElementById("btnCloseOverlay");
+const btnCompareView = document.getElementById("btnCompareView");
+const compareCountEl = document.getElementById("compareCount");
+
+const factTitle = document.getElementById("factTitle");
+const factSubtitle = document.getElementById("factSubtitle");
+const factPickerRow = document.getElementById("factPickerRow");
+const factPicker = document.getElementById("factPicker");
+const btnLoadPicked = document.getElementById("btnLoadPicked");
+
+const factCardHost = document.getElementById("factCardHost");
+const compareArea = document.getElementById("compareArea");
+const compareCards = document.getElementById("compareCards");
 
 // ========= Populate dropdowns from CSV =========
 function populateFiltersFromData() {
@@ -261,27 +294,272 @@ btnClearFilters.addEventListener("click", () => {
   renderAll();
 });
 
+// ========= Overlay: Fact builder + UI =========
+function rowIdentity(row) {
+  // Best-effort unique-ish id for basket dedupe
+  const name = pickFirst(row, ["Project name", "Project Name", "Intervention name", "Intervention Name", "Name", "Title"]);
+  const city = (row?.[COL_CITY] ?? "").trim();
+  const country = (row?.[COL_COUNTRY] ?? "").trim();
+  const status = (row?.[COL_STATUS] ?? "").trim();
+  const lat = String(row?.[COL_LAT] ?? "");
+  const lon = String(row?.[COL_LON] ?? "");
+  return norm(`${name}__${city}__${country}__${status}__${lat}__${lon}`);
+}
+
+function buildFact(row) {
+  const name = pickFirst(row, ["Project name", "Project Name", "Intervention name", "Intervention Name", "Name", "Title"]) || "Unnamed project";
+  const city = (row?.[COL_CITY] ?? "").trim();
+  const country = (row?.[COL_COUNTRY] ?? "").trim();
+  const status = (row?.[COL_STATUS] ?? "").trim() || "Unknown";
+
+  const types = TYPE_COLUMNS.filter(t => isYes(row?.[t.col])).map(t => t.label);
+  const challenges = CHALLENGE_COLUMNS.filter(c => isYes(row?.[c.col])).map(c => c.label);
+
+  const cost = pickFirst(row, ["Cost", "Costs", "Estimated cost", "Total cost", "Budget"]);
+  const source = pickFirst(row, ["Source", "Sources", "Website", "URL", "Link", "Reference"]);
+
+  return { name, city, country, status, types, challenges, cost: String(cost ?? "").trim(), source: String(source ?? "").trim() };
+}
+
+function pillHTML(items) {
+  const list = (items ?? []).filter(Boolean);
+  if (!list.length) return `<span class="pill">Not specified</span>`;
+  return list.map(x => `<span class="pill">${escapeHtml(x)}</span>`).join("");
+}
+
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function renderFactCard(row) {
+  const fact = buildFact(row);
+  const locationLine = [fact.city, fact.country].filter(Boolean).join(", ") || fact.country || "—";
+
+  const canAdd = state.overlay.compare.length < 3;
+  const id = rowIdentity(row);
+
+  // is already in compare?
+  const inCompare = state.overlay.compare.some(r => rowIdentity(r) === id);
+
+  const sourceHTML = /^https?:\/\//i.test(fact.source)
+    ? `<a href="${escapeHtml(fact.source)}" target="_blank" rel="noopener noreferrer">Open source</a>`
+    : escapeHtml(fact.source || "—");
+
+  factTitle.textContent = fact.name;
+  factSubtitle.textContent = locationLine;
+
+  factCardHost.innerHTML = `
+    <div class="factCard">
+      <div class="factCard__head">
+        <div>
+          <h3 class="factCard__title">${escapeHtml(fact.name)}</h3>
+          <p class="factCard__sub">${escapeHtml(locationLine)}</p>
+        </div>
+        <div class="factCard__btnRow">
+          <button id="btnAddCompare" class="btn btn-sm btn-primary" ${(!canAdd || inCompare) ? "disabled" : ""}>
+            ${inCompare ? "In compare" : "Compare (+)"}
+          </button>
+        </div>
+      </div>
+
+      <div class="factCard__body">
+        <div class="factBlock">
+          <div class="factBlock__label">Status</div>
+          <div class="factBlock__value">${escapeHtml(fact.status)}</div>
+        </div>
+
+        <div class="factBlock">
+          <div class="factBlock__label">NbS types</div>
+          <div class="factBlock__value"><div class="pills">${pillHTML(fact.types)}</div></div>
+        </div>
+
+        <div class="factBlock">
+          <div class="factBlock__label">Challenges addressed</div>
+          <div class="factBlock__value"><div class="pills">${pillHTML(fact.challenges)}</div></div>
+        </div>
+
+        <div class="factBlock">
+          <div class="factBlock__label">Cost</div>
+          <div class="factBlock__value">${escapeHtml(fact.cost || "—")}</div>
+        </div>
+
+        <div class="factBlock">
+          <div class="factBlock__label">Source</div>
+          <div class="factBlock__value">${sourceHTML}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const btn = document.getElementById("btnAddCompare");
+  if (btn) {
+    btn.addEventListener("click", () => {
+      addToCompare(row);
+      renderCompare();
+      // re-render main card to update button state
+      renderFactCard(row);
+    });
+  }
+}
+
+function openOverlayWithRows(rows) {
+  state.overlay.activeRows = rows.slice();
+  state.overlay.activeIndex = 0;
+
+  // picker setup if multiple
+  if (rows.length > 1) {
+    factPickerRow.classList.remove("hidden");
+    factPicker.innerHTML = "";
+    rows.forEach((r, idx) => {
+      const f = buildFact(r);
+      const loc = [f.city, f.country].filter(Boolean).join(", ");
+      const opt = document.createElement("option");
+      opt.value = String(idx);
+      opt.textContent = `${f.name}${loc ? " — " + loc : ""}`;
+      factPicker.appendChild(opt);
+    });
+  } else {
+    factPickerRow.classList.add("hidden");
+    factPicker.innerHTML = "";
+  }
+
+  // show overlay
+  state.overlay.isOpen = true;
+  factOverlay.classList.remove("hidden");
+  factOverlay.setAttribute("aria-hidden", "false");
+
+  // render card
+  renderFactCard(state.overlay.activeRows[state.overlay.activeIndex]);
+
+  // compare summary
+  renderCompare();
+}
+
+function closeOverlay() {
+  state.overlay.isOpen = false;
+  factOverlay.classList.add("hidden");
+  factOverlay.setAttribute("aria-hidden", "true");
+  compareArea.classList.add("hidden");
+}
+
+function addToCompare(row) {
+  const id = rowIdentity(row);
+  if (state.overlay.compare.some(r => rowIdentity(r) === id)) return;
+  if (state.overlay.compare.length >= 3) return;
+  state.overlay.compare.push(row);
+}
+
+function removeFromCompareById(id) {
+  state.overlay.compare = state.overlay.compare.filter(r => rowIdentity(r) !== id);
+}
+
+function renderCompare() {
+  compareCountEl.textContent = String(state.overlay.compare.length);
+
+  // If compare area is toggled on, render it. Otherwise keep it hidden.
+  if (!compareArea.classList.contains("hidden")) {
+    compareCards.innerHTML = "";
+
+    state.overlay.compare.forEach(r => {
+      const id = rowIdentity(r);
+      const f = buildFact(r);
+      const loc = [f.city, f.country].filter(Boolean).join(", ") || f.country || "—";
+
+      const sourceHTML = /^https?:\/\//i.test(f.source)
+        ? `<a href="${escapeHtml(f.source)}" target="_blank" rel="noopener noreferrer">Open source</a>`
+        : escapeHtml(f.source || "—");
+
+      const card = document.createElement("div");
+      card.className = "compareCard";
+      card.innerHTML = `
+        <div class="compareCard__head">
+          <div>
+            <h3 class="compareCard__title">${escapeHtml(f.name)}</h3>
+            <p class="compareCard__sub">${escapeHtml(loc)}</p>
+          </div>
+          <button class="compareCard__remove" type="button" aria-label="Remove">✕</button>
+        </div>
+        <div class="compareCard__body">
+          <div class="factBlock">
+            <div class="factBlock__label">Status</div>
+            <div class="factBlock__value">${escapeHtml(f.status)}</div>
+          </div>
+
+          <div class="factBlock">
+            <div class="factBlock__label">NbS types</div>
+            <div class="factBlock__value"><div class="pills">${pillHTML(f.types)}</div></div>
+          </div>
+
+          <div class="factBlock">
+            <div class="factBlock__label">Challenges</div>
+            <div class="factBlock__value"><div class="pills">${pillHTML(f.challenges)}</div></div>
+          </div>
+
+          <div class="factBlock">
+            <div class="factBlock__label">Cost</div>
+            <div class="factBlock__value">${escapeHtml(f.cost || "—")}</div>
+          </div>
+
+          <div class="factBlock">
+            <div class="factBlock__label">Source</div>
+            <div class="factBlock__value">${sourceHTML}</div>
+          </div>
+        </div>
+      `;
+
+      card.querySelector(".compareCard__remove").addEventListener("click", () => {
+        removeFromCompareById(id);
+        renderCompare();
+
+        // also refresh main card if needed
+        const active = state.overlay.activeRows[state.overlay.activeIndex];
+        if (active) renderFactCard(active);
+      });
+
+      compareCards.appendChild(card);
+    });
+  }
+}
+
+// overlay events
+btnCloseOverlay.addEventListener("click", closeOverlay);
+factOverlayBackdrop.addEventListener("click", closeOverlay);
+
+btnCompareView.addEventListener("click", () => {
+  // toggle compare area visibility
+  const isHidden = compareArea.classList.contains("hidden");
+  if (isHidden) {
+    compareArea.classList.remove("hidden");
+  } else {
+    compareArea.classList.add("hidden");
+  }
+  renderCompare();
+});
+
+btnLoadPicked.addEventListener("click", () => {
+  const idx = parseInt(factPicker.value, 10);
+  if (!Number.isFinite(idx)) return;
+  if (idx < 0 || idx >= state.overlay.activeRows.length) return;
+  state.overlay.activeIndex = idx;
+  renderFactCard(state.overlay.activeRows[state.overlay.activeIndex]);
+});
+
+// ESC to close overlay
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.overlay.isOpen) closeOverlay();
+});
+
 // ========= Map utils =========
 function featureNameAndContinent(f) {
   const p = f.properties || {};
   const name = p.ADMIN || p.NAME || p.name || "";
   const cont = p.CONTINENT || p.continent || "";
   return { name, cont };
-}
-
-function pointInBounds(pt, bounds) {
-  if (!bounds) return true;
-  const [[x0, y0], [x1, y1]] = bounds;
-  const [x, y] = pt;
-  return x >= x0 && x <= x1 && y >= y0 && y <= y1;
-}
-
-function continentProjectedBounds(path, continent) {
-  if (!worldGeo || !continent) return null;
-  const feats = worldGeo.features.filter(f => featureNameAndContinent(f).cont === continent);
-  if (!feats.length) return null;
-  const fc = { type: "FeatureCollection", features: feats };
-  return path.bounds(fc);
 }
 
 // Zoom helper that matches your projection fit area [[10,10],[width-10,height-40]]
@@ -328,6 +606,8 @@ function zoomToContinentPoints(capture, projection, width, height, continent, da
       const lat = +d[COL_LAT];
       const lon = +d[COL_LON];
       if (!isFiniteNumber(lat) || !isFiniteNumber(lon)) return null;
+      const bbox = CONTINENT_BBOX.get(continent);
+      if (bbox && !inBBox(lon, lat, bbox, 0.5)) return null;
       const p = projection([lon, lat]);
       if (!p) return null;
       return p;
@@ -340,9 +620,7 @@ function zoomToContinentPoints(capture, projection, width, height, continent, da
   const ys = pts.map(p => p[1]);
   const bounds = [[d3.min(xs), d3.min(ys)], [d3.max(xs), d3.max(ys)]];
 
-  // More "zoomed out" than before:
-  // - higher padding
-  // - slightly smaller zoomFactor (=> less zoom-in)
+  // More "zoomed out":
   zoomToBounds(capture, bounds, width, height, 70, 0.80);
   return true;
 }
@@ -381,38 +659,48 @@ function renderMap() {
   // Zoom capture layer
   const capture = svg.append("rect").attr("class", "zoom-capture")
     .attr("width", width).attr("height", height).attr("fill", "transparent").style("pointer-events", "all");
-  
+
   const gBase = svg.append("g").attr("class", "map-base");
   const gUI = svg.append("g").attr("class", "map-ui");
 
-  // Zoom Behavior
-  mapZoom = d3.zoom().scaleExtent([1, 8]).on("zoom", e => {
-    state.mapTransform = e.transform;
-    const k = state.mapTransform.k;
+  // Zoom Behavior (KEY: filter out clicks on dots so click works reliably)
+  mapZoom = d3.zoom()
+    .scaleExtent([1, 8])
+    .filter((event) => {
+      const t = event.target;
+      // allow wheel always
+      if (event.type === "wheel") return true;
+      // block zoom start when clicking dots/bubbles
+      if (t && t.closest && (t.closest(".project-dot") || t.closest(".semantic-zoom-group"))) {
+        return false;
+      }
+      return true;
+    })
+    .on("zoom", e => {
+      state.mapTransform = e.transform;
+      const k = state.mapTransform.k;
 
-    gBase.attr("transform", state.mapTransform);
+      gBase.attr("transform", state.mapTransform);
 
-    gBase.selectAll(".semantic-zoom-group")
-      .attr("transform", d => `translate(${d.x}, ${d.y}) scale(${1/k})`);
-  });
+      gBase.selectAll(".semantic-zoom-group")
+        .attr("transform", d => `translate(${d.x}, ${d.y}) scale(${1/k})`);
+    });
 
   svg.call(mapZoom)
      .call(mapZoom.transform, state.mapTransform || d3.zoomIdentity)
-     .on("dblclick.zoom", null); // Optional: Disable double-click zoom
+     .on("dblclick.zoom", null);
 
   // Draw Countries
   gBase.append("g").selectAll("path").data(worldGeo.features).join("path")
     .attr("d", path)
     .attr("fill", d => {
-      const n = norm(d.properties.ADMIN || d.properties.NAME || d.properties.name);
-      
       // Highlight Selected Country
       if (state.filters.country) {
         const filterName = norm(state.filters.country);
         const targetFeat = countryFeatureByName.get(filterName);
-        if (targetFeat === d) return "#1d4ed8"; // Active Blue
+        if (targetFeat === d) return "#1d4ed8";
       }
-      return "#f8fafc"; // Default Gray
+      return "#f8fafc";
     })
     .attr("stroke", "#cbd5e1")
     .attr("stroke-width", 0.6)
@@ -432,7 +720,7 @@ function renderMap() {
       // Continent Level
       const contCounts = d3.rollups(filtered, v => v.length, d => countryToContinent.get(norm(d[COL_COUNTRY])) || "Unknown")
         .map(([c, v]) => ({ key: c, value: v })).filter(d => d.key !== "Unknown").sort((a,b)=>b.value-a.value);
-      
+
       const anchors = new Map([
         ["Africa", [20, 5]], ["Europe", [15, 52]], ["Asia", [95, 40]],
         ["North America", [-100, 45]], ["South America", [-60, -15]], ["Oceania", [135, -25]]
@@ -449,11 +737,11 @@ function renderMap() {
       // Country Level
       const countryCounts = d3.rollups(filtered, v => v.length, d => d[COL_COUNTRY])
         .map(([c, v]) => ({ key: c, value: v })).sort((a,b)=>b.value-a.value);
-      
+
       bubbleData = countryCounts.map(d => {
         const feat = countryFeatureByName.get(norm(d.key));
         if(!feat) return null;
-        
+
         const c = getLargestPolygonCentroid(feat, path);
         return { ...d, x: c[0], y: c[1], type: 'country' };
       }).filter(Boolean);
@@ -495,34 +783,41 @@ function renderMap() {
       .text(d => d.key);
   }
 
-  // --- LEVEL 3: PROJECT DOTS ---
+  // --- LEVEL 3: PROJECT DOTS + FACT POPUP ---
   if (isCountry) {
-    const locationGroups = d3.rollups(filtered, v => v.length, d => d[COL_LON] + "::" + d[COL_LAT]);
+    // group rows by lon/lat so we can open 1 or many in the popup
+    const groups = d3.group(filtered, d => `${d[COL_LON]}::${d[COL_LAT]}`);
 
-    const dotData = locationGroups.map(([key, count]) => {
+    const dotData = Array.from(groups, ([key, rows]) => {
       const [lonStr, latStr] = key.split("::");
-      const p = projection([+lonStr, +latStr]);
-      return p ? { x: p[0], y: p[1], count } : null;
+      const lon = +lonStr, lat = +latStr;
+      const p = projection([lon, lat]);
+      if (!p) return null;
+      return { x: p[0], y: p[1], count: rows.length, rows };
     }).filter(Boolean);
 
     const dots = gBase.append("g").selectAll("g")
       .data(dotData).join("g")
-      .attr("class", "semantic-zoom-group")
+      .attr("class", "semantic-zoom-group project-dot")
       .attr("transform", d => `translate(${d.x}, ${d.y}) scale(${1 / currentK})`)
-      .style("cursor", "pointer");
+      .style("cursor", "pointer")
+      .on("mousedown", (e) => e.stopPropagation())
+      .on("click", (e, d) => {
+        e.stopPropagation();
+        openOverlayWithRows(d.rows);
+      });
 
-    // Dot Size
     dots.append("circle")
-      .attr("r", d => d.count > 1 ? 7 : 4) 
-      .attr("fill", "#ef4444").attr("stroke", "white").attr("stroke-width", 1.5);
+      .attr("r", d => d.count > 1 ? 7 : 4)
+      .attr("fill", "#ef4444")
+      .attr("stroke", "white")
+      .attr("stroke-width", 1.5);
 
-    // Count Label
     dots.filter(d => d.count > 1).append("text")
       .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
       .attr("fill", "white").attr("font-size", 10).attr("font-weight", "bold")
       .text(d => d.count);
-      
-    // Tooltip
+
     dots.append("title").text(d => `${d.count} Project(s) here`);
   }
 
@@ -534,7 +829,6 @@ function renderMap() {
     const ok = zoomToContinentPoints(capture, projection, width, height, state.selectedContinent, filtered);
     if (!ok) zoomToContinent(capture, path, width, height, state.selectedContinent);
   } else {
-    // Reset World
     const t = state.mapTransform;
     if (Math.abs(t.x) > 0.5 || Math.abs(t.y) > 0.5 || t.k > 1.01) {
       state.mapTransform = d3.zoomIdentity;
@@ -566,7 +860,6 @@ function renderMap() {
   gUI.append("text").attr("x", width/2).attr("y", height - 12).attr("text-anchor", "middle").attr("fill", "#94a3b8").attr("font-size", 11)
     .text(`Filtered projects: ${filtered.length}`);
 }
-
 
 // ========= Render: Bar =========
 function renderBar() {
@@ -639,16 +932,26 @@ function renderBar() {
 
 // ========= Donut: static colors + legend + click status =========
 const STATUS_COLOR = new Map([
-  ["Completed", "#1f77b4"],
-  ["Ongoing", "#f1c40f"],
-  ["In planning stage", "#2ecc71"],
-  ["In piloting stage", "#e74c3c"],
-  ["Planned, but cancelled", "#9b59b6"],
-  ["Completed and archived or cancelled", "#7f8c8d"],
-  ["Envisioned", "#ff7f0e"],
-  ["Other", "#95a5a6"],
-  ["Unknown", "#bdc3c7"]
+  // Completed → strong green
+  ["Completed", "#1b9e3c"],
+  // Ongoing → orange
+  ["Ongoing", "#f59e0b"],
+  // Planning → blue
+  ["In planning stage", "#195ef4"],
+  // Piloting → purple (clearly distinct from planning & ongoing)
+  ["In piloting stage", "#703fc5"],
+  // Cancelled → red
+  ["Planned, but cancelled", "#dc2626"],
+  // Archived / cancelled → dark maroon (still “red family” but distinct)
+  ["Completed and archived or cancelled", "#7f1d1d"],
+  // Envisioned → teal (future-oriented, distinct from blue)
+  ["Envisioned", "#db2777"], // magenta
+  // Neutral categories
+  ["Unknown", "#d1d3d6"],   // light grey
+  ["Other", "#686f7f"]      // darker grey
 ]);
+
+
 
 function colorForStatus(s) {
   return STATUS_COLOR.get(s) || "#94a3b8";
@@ -669,8 +972,12 @@ function renderDonut() {
 
   const r = Math.min(width, height) / 2 - 25;
 
+  const cx = Math.max(140, (width / 2) - 70);  // shift donut left
+  const cy = height / 2;
+
   const g = svg.append("g")
-    .attr("transform", `translate(${width / 2},${height / 2})`);
+    .attr("transform", `translate(${cx},${cy})`);
+
 
   const pie = d3.pie().value(d => d.value);
   const arc = d3.arc().innerRadius(r * 0.55).outerRadius(r);
@@ -861,8 +1168,6 @@ window.addEventListener("resize", renderAll);
 
 // ========= Load data (CSV + TopoJSON) =========
 function loadWorld() {
-  // Requires topojson-client in index.html:
-  // <script src="https://unpkg.com/topojson-client@3"></script>
   return d3.json("data/world_countries_110m.topojson").then(topo => {
     if (!topo || typeof topojson === "undefined") {
       throw new Error("TopoJSON loaded but topojson-client not available (check script include)");
@@ -892,7 +1197,7 @@ Promise.all([
       const stored = locationLookUp.get(key);
       d[COL_LAT] = stored.lat;
       d[COL_LON] = stored.lon;
-    } 
+    }
     else if (isFiniteNumber(lat) && isFiniteNumber(lon)) {
       // First time seeing this city -> store as canonical
       locationLookUp.set(key, { lat, lon });
@@ -926,6 +1231,7 @@ Promise.all([
     if (feat) countryFeatureByName.set(norm(k), feat);
   }
 
+  // Fix points outside polygons by snapping to centroid (teammate logic kept)
   rawData.forEach(d => {
     const lon = +d[COL_LON];
     const lat = +d[COL_LAT];
@@ -934,17 +1240,9 @@ Promise.all([
     if (!isFiniteNumber(lat) || !isFiniteNumber(lon)) return;
 
     const feat = countryFeatureByName.get(norm(country));
-    if (!feat) return; // no country polygon
+    if (!feat) return;
 
     if (!d3.geoContains(feat, [lon, lat])) {
-      console.warn(
-        "Point outside country polygon, fixing:",
-        d[COL_CITY],
-        country,
-        lat,
-        lon
-      );
-
       const centroid = d3.geoCentroid(feat);
       d[COL_LON] = centroid[0];
       d[COL_LAT] = centroid[1];
@@ -957,4 +1255,3 @@ Promise.all([
 }).catch(err => {
   console.error("Data load failed:", err);
 });
-
